@@ -69,14 +69,14 @@ export class GameScene extends Phaser.Scene {
     this.camX = this.player.x;
     this.camY = this.player.y;
     this.cameras.main.centerOn(this.camX, this.camY);
-    const applyZoom = () => this.cameras.main.setZoom(Phaser.Math.Clamp(this.scale.height / 1000, 0.6, 1.4));
-    applyZoom();
-    this.scale.on('resize', applyZoom, this);
+    // Zoom caméra = 1 impératif : un zoom ≠ 1 décale les éléments d'UI
+    // (scrollFactor 0 : bouton ULT, joysticks) par rapport aux coordonnées du
+    // pointeur, ce qui casse la détection tactile du bouton ULT.
+    this.cameras.main.setZoom(1);
 
     this.hud.flash('BATTLE ROYALE !', '#ffcf33');
 
     this.events.once('shutdown', () => {
-      this.scale.off('resize', applyZoom, this);
       this.playerController.destroy();
       this.hud.destroy();
       this.mode.destroy();

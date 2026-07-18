@@ -70,18 +70,15 @@ export class PlayerController {
     this.ultLabel.setPosition(w - 96, h - 104);
   }
 
-  /** Appui pile sur le bouton ULT (tolérance généreuse pour le doigt). */
+  /** Appui sur le bouton ULT lui-même (petite tolérance pour le doigt). */
   private overUltBtn(x: number, y: number): boolean {
-    return Math.hypot(x - this.ultBtn.x, y - this.ultBtn.y) <= this.ultBtn.radius + 16;
-  }
-
-  /** Zone RÉSERVÉE autour du bouton ULT : le joystick de visée ne s'y active pas. */
-  private nearUltBtn(x: number, y: number): boolean {
-    return Math.hypot(x - this.ultBtn.x, y - this.ultBtn.y) <= this.ultBtn.radius + 76;
+    return Math.hypot(x - this.ultBtn.x, y - this.ultBtn.y) <= this.ultBtn.radius + 12;
   }
 
   private onDown(pointer: Phaser.Input.Pointer): void {
-    // Le bouton ULT est prioritaire (zone d'appui généreuse).
+    // Le bouton ULT est prioritaire : un appui DESSUS déclenche l'ultimate et
+    // ne crée jamais de joystick. Tout le reste du coin reste dispo pour viser
+    // (le joystick n'est bloqué que sur le bouton lui-même).
     if (this.overUltBtn(pointer.x, pointer.y)) {
       this.ultQueued = true;
       return;
@@ -93,11 +90,8 @@ export class PlayerController {
     const half = this.scene.scale.width * 0.5;
     if (pointer.x < half) {
       if (!this.moveStick.active) this.moveStick.engage(pointer.id, pointer.x, pointer.y);
-    } else {
-      // Moitié droite = visée, MAIS on réserve le coin du bouton ULT : un appui
-      // dans cette zone ne fait pas apparaître le joystick (qui gênerait l'ULT).
-      if (this.nearUltBtn(pointer.x, pointer.y)) return;
-      if (!this.aimStick.active) this.aimStick.engage(pointer.id, pointer.x, pointer.y);
+    } else if (!this.aimStick.active) {
+      this.aimStick.engage(pointer.id, pointer.x, pointer.y);
     }
   }
 

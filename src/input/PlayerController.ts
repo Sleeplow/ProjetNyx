@@ -45,15 +45,15 @@ export class PlayerController {
     kb.on('keydown-SPACE', () => (this.ultQueued = true));
 
     this.ultBtn = scene.add
-      .circle(0, 0, 46, COLORS.ultReady, 0.22)
-      .setStrokeStyle(3, COLORS.ultReady, 0.9)
+      .circle(0, 0, 54, COLORS.ultReady, 0.22)
+      .setStrokeStyle(4, COLORS.ultReady, 0.9)
       .setScrollFactor(0)
-      .setDepth(1000);
+      .setDepth(1005);
     this.ultLabel = scene.add
-      .text(0, 0, 'ULT', { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#ffcf33', fontStyle: 'bold' })
+      .text(0, 0, 'ULT', { fontFamily: 'system-ui, sans-serif', fontSize: '20px', color: '#ffcf33', fontStyle: 'bold' })
       .setOrigin(0.5)
       .setScrollFactor(0)
-      .setDepth(1001);
+      .setDepth(1006);
     this.layout();
 
     scene.scale.on('resize', this.layout, this);
@@ -66,15 +66,22 @@ export class PlayerController {
   private layout(): void {
     const w = this.scene.scale.width;
     const h = this.scene.scale.height;
-    this.ultBtn.setPosition(w - 82, h - 90);
-    this.ultLabel.setPosition(w - 82, h - 90);
+    this.ultBtn.setPosition(w - 96, h - 104);
+    this.ultLabel.setPosition(w - 96, h - 104);
   }
 
+  /** Appui pile sur le bouton ULT (tolérance généreuse pour le doigt). */
   private overUltBtn(x: number, y: number): boolean {
-    return Math.hypot(x - this.ultBtn.x, y - this.ultBtn.y) <= this.ultBtn.radius + 6;
+    return Math.hypot(x - this.ultBtn.x, y - this.ultBtn.y) <= this.ultBtn.radius + 16;
+  }
+
+  /** Zone RÉSERVÉE autour du bouton ULT : le joystick de visée ne s'y active pas. */
+  private nearUltBtn(x: number, y: number): boolean {
+    return Math.hypot(x - this.ultBtn.x, y - this.ultBtn.y) <= this.ultBtn.radius + 76;
   }
 
   private onDown(pointer: Phaser.Input.Pointer): void {
+    // Le bouton ULT est prioritaire (zone d'appui généreuse).
     if (this.overUltBtn(pointer.x, pointer.y)) {
       this.ultQueued = true;
       return;
@@ -86,8 +93,11 @@ export class PlayerController {
     const half = this.scene.scale.width * 0.5;
     if (pointer.x < half) {
       if (!this.moveStick.active) this.moveStick.engage(pointer.id, pointer.x, pointer.y);
-    } else if (!this.aimStick.active) {
-      this.aimStick.engage(pointer.id, pointer.x, pointer.y);
+    } else {
+      // Moitié droite = visée, MAIS on réserve le coin du bouton ULT : un appui
+      // dans cette zone ne fait pas apparaître le joystick (qui gênerait l'ULT).
+      if (this.nearUltBtn(pointer.x, pointer.y)) return;
+      if (!this.aimStick.active) this.aimStick.engage(pointer.id, pointer.x, pointer.y);
     }
   }
 

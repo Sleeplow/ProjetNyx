@@ -63,6 +63,6 @@ export class ModeSelectScene extends Phaser.Scene {
     this.nameText.setText(m.name);
     this.taglineText.setText(m.tagline);
     this.descText.setText(m.description);
-    this.counterText.setText(`${this.index + 1} / ${MODES.length}   ·   d'autres modes à venir`);
+    this.counterText.setText(`${this.index + 1} / ${MODES.length}`);
   }
 }

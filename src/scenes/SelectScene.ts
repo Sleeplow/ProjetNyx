@@ -51,7 +51,9 @@ export class SelectScene extends Phaser.Scene {
       .text(cx, h * 0.6, '', { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#d8d8ff', align: 'center', lineSpacing: 5, wordWrap: { width: Math.min(760, w - 60) } })
       .setOrigin(0.5, 0);
 
-    makeButton(this, cx, h - 58, 280, 62, 'LANCER LA PARTIE', () => this.scene.start('Game', { zarekId: this.selectedId, modeId: this.modeId }));
+    // Chaque mode a sa scène : le foot (Brawl Ball) tourne dans SoccerScene.
+    const targetScene = this.modeId === 'brawl-ball' ? 'Soccer' : 'Game';
+    makeButton(this, cx, h - 58, 280, 62, 'LANCER LA PARTIE', () => this.scene.start(targetScene, { zarekId: this.selectedId, modeId: this.modeId }));
 
     this.refresh();
   }

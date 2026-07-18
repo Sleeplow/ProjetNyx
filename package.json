@@ -1,6 +1,6 @@
 {
   "name": "projetnyxt",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Projet Nyxt — jeu web type Brawl Stars (Battle Royale). Extensible : Zareks, cartes et modes pilotés par des données.",
   "type": "module",
   "scripts": {

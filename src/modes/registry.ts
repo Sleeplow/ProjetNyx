@@ -21,5 +21,12 @@ export const BATTLE_ROYALE: GameModeDef = {
   description: '1 joueur contre 4 NPC. La zone se referme, ramasse des cubes de power-up et sois le dernier en vie.',
 };
 
+export const BRAWL_BALL: GameModeDef = {
+  id: 'brawl-ball',
+  name: 'Brawl Ball',
+  tagline: 'Football 3 v 3',
+  description: 'Deux équipes de 3. Attrape la balle et marque dans le but adverse. Premier à 2 buts — ou but en or après 2 minutes.',
+};
+
 /** Ordre affiché dans le sélecteur (roulette). */
-export const MODES: GameModeDef[] = [BATTLE_ROYALE];
+export const MODES: GameModeDef[] = [BATTLE_ROYALE, BRAWL_BALL];

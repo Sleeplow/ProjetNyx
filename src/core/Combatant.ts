@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import type { ZarekDef } from './types';
 import { COLORS } from '../config/constants';
-import { POWER_CUBE } from '../config/constants';
+import { POWER_CUBE, REGEN } from '../config/constants';
 
 /**
  * Un combattant : joueur ou NPC. Contient l'ÉTAT de simulation (position, PV,
@@ -18,6 +18,8 @@ export class Combatant {
   x: number;
   y: number;
   aimAngle = 0;
+  /** Distance de visée (longueur du vecteur de visée) — sert au lancer de potion. */
+  aimDist = 0;
 
   health: number;
   cubes = 0;
@@ -35,8 +37,14 @@ export class Combatant {
   kbY = 0;
   /** Vrai si le centre du combattant est dans un buisson (caché). */
   inBush = false;
+  /** Temps écoulé depuis le dernier tir OU dégât subi (ms) — pilote la régén. */
+  sinceCombatMs = 0;
+  /** Poison actif : durée restante (ms) et dégâts/seconde. Persiste hors de l'aura. */
+  poisonMs = 0;
+  poisonDps = 0;
 
   private readonly container: Phaser.GameObjects.Container;
+  private readonly ultGlow: Phaser.GameObjects.Arc;
   private readonly body: Phaser.GameObjects.Arc;
   private readonly barrel: Phaser.GameObjects.Rectangle;
   private readonly hpBack: Phaser.GameObjects.Rectangle;
@@ -54,6 +62,20 @@ export class Combatant {
     this.health = def.maxHealth;
 
     const r = def.radius;
+
+    // Halo « ultime prêt » : anneau qui irradie doucement (pulsation, pas stroboscope),
+    // affiché quand l'ult est chargé. Visible aussi sur les NPC (télégraphe leur ult).
+    this.ultGlow = scene.add.circle(0, 0, r + 8, COLORS.ultReady, 0).setStrokeStyle(4, COLORS.ultReady, 0.9).setVisible(false);
+    scene.tweens.add({
+      targets: this.ultGlow,
+      scale: 1.45,
+      alpha: 0.15,
+      duration: 720,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.inOut',
+    });
+
     this.body = scene.add.circle(0, 0, r, def.color).setStrokeStyle(isPlayer ? 5 : 3, isPlayer ? COLORS.playerAccent : def.accent);
 
     // « Canon » : rectangle qui pointe dans la direction de visée (origine à la base).
@@ -81,6 +103,7 @@ export class Combatant {
       .setOrigin(0.5, 0);
 
     this.container = scene.add.container(x, y, [
+      this.ultGlow,
       this.barrel,
       this.body,
       this.hpBack,
@@ -111,6 +134,7 @@ export class Combatant {
   /** Applique des dégâts. Renvoie les dégâts réellement infligés (pour la charge d'ultimate). */
   takeDamage(amount: number): number {
     if (!this.alive) return 0;
+    if (amount > 0) this.sinceCombatMs = 0; // subir des dégâts interrompt la régén
     const before = this.health;
     this.health = Math.max(0, this.health - amount);
     if (this.health <= 0) this.alive = false;
@@ -135,26 +159,59 @@ export class Combatant {
     this.slowFactor = factor;
   }
 
+  applyPoison(ms: number, dps: number): void {
+    if (ms <= 0) return;
+    this.poisonMs = Math.max(this.poisonMs, ms);
+    this.poisonDps = Math.max(this.poisonDps, dps);
+  }
+
+  /** Inflige les dégâts de poison de la frame (le poison perdure hors de l'aura). */
+  tickPoison(dtMs: number): void {
+    if (this.poisonMs <= 0) return;
+    this.takeDamage(this.poisonDps * (dtMs / 1000));
+    this.poisonMs -= dtMs;
+    if (this.poisonMs <= 0) this.poisonDps = 0;
+  }
+
   applyKnockback(dirX: number, dirY: number, force: number): void {
     this.kbX += dirX * force;
     this.kbY += dirY * force;
   }
 
-  /** Ramasse un cube de power-up : augmente PV max + dégâts, et soigne un peu. */
+  /**
+   * Ramasse un cube : augmente PV max + dégâts, avec seulement un PETIT soin
+   * (pas un remplissage complet). Il faut se régénérer (hors combat) pour
+   * combler le reste jusqu'au nouveau max (ex. 1000/1000 + cube → ~1030/1200).
+   */
   pickCube(): void {
     const beforeMax = this.maxHealth;
     this.cubes += 1;
     const gained = this.maxHealth - beforeMax;
-    this.health = Math.min(this.maxHealth, this.health + gained + beforeMax * 0.05);
+    this.health = Math.min(this.maxHealth, this.health + gained * 0.35);
   }
 
   tickTimers(dtMs: number): void {
     if (this.reloadTimer > 0) this.reloadTimer -= dtMs;
     if (this.slowTimer > 0) this.slowTimer -= dtMs;
+    this.sinceCombatMs += dtMs;
   }
 
-  /** Met à jour l'affichage à partir de l'état. */
-  syncDisplay(): void {
+  /** À appeler quand le combattant tire : ça interrompt la régén. */
+  noteAttack(): void {
+    this.sinceCombatMs = 0;
+  }
+
+  /** Régénère un peu de vie si le combattant est resté hors combat assez longtemps. */
+  regenerate(dtMs: number): void {
+    if (!this.alive || this.sinceCombatMs < REGEN.delayMs || this.health >= this.maxHealth) return;
+    this.health = Math.min(this.maxHealth, this.health + this.maxHealth * REGEN.percentPerSecond * (dtMs / 1000));
+  }
+
+  /**
+   * Met à jour l'affichage. `revealedToPlayer` indique si ce combattant est
+   * visible du point de vue du joueur (calculé par la scène).
+   */
+  syncDisplay(revealedToPlayer: boolean): void {
     this.container.setPosition(this.x, this.y);
     this.barrel.setRotation(this.aimAngle);
 
@@ -162,11 +219,18 @@ export class Combatant {
     this.hpFill.fillColor = this.healthRatio > 0.35 ? COLORS.healthGood : COLORS.healthLow;
 
     this.cubeText.setText(this.cubes > 0 ? `◆${this.cubes}` : '');
+    this.ultGlow.setVisible(this.ultReady && this.alive);
 
-    // Rendu « caché dans un buisson » : le joueur reste bien visible, les NPC s'estompent.
-    const hidden = this.inBush;
-    const alpha = hidden ? (this.isPlayer ? 0.6 : 0.28) : 1;
-    this.container.setAlpha(alpha);
+    // Furtivité symétrique : un ennemi dans un buisson est INVISIBLE pour le
+    // joueur tant qu'il n'est pas révélé (de près) — comme le joueur l'est pour
+    // les bots. Le joueur se voit toujours, juste estompé quand il est caché.
+    if (this.isPlayer) {
+      this.container.setVisible(true).setAlpha(this.inBush ? 0.55 : 1);
+    } else if (this.inBush && !revealedToPlayer) {
+      this.container.setVisible(false);
+    } else {
+      this.container.setVisible(true).setAlpha(this.inBush ? 0.5 : 1);
+    }
   }
 
   destroy(): void {

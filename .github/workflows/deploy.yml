@@ -62,6 +62,7 @@ jobs:
           clean-exclude: |
             qa
             qa/**
+            CNAME
 
   # QA : sous-dossier /qa/ de gh-pages (le nettoyage reste circonscrit à /qa/).
   deploy-qa:

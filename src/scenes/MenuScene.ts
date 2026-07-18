@@ -21,14 +21,14 @@ export class MenuScene extends Phaser.Scene {
       .text(cx, h * 0.32, 'PROJET NYXT', { fontFamily: 'system-ui, sans-serif', fontSize: '64px', color: '#ffffff', fontStyle: 'bold' })
       .setOrigin(0.5);
     this.add
-      .text(cx, h * 0.32 + 56, 'Battle Royale · 1 joueur contre 4 NPC', {
+      .text(cx, h * 0.32 + 56, 'Battle Royale', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '22px',
         color: '#9b8cff',
       })
       .setOrigin(0.5);
 
-    makeButton(this, cx, h * 0.6, 300, 76, 'JOUER', () => this.scene.start('Select'));
+    makeButton(this, cx, h * 0.6, 300, 76, 'JOUER', () => this.scene.start('ModeSelect'));
 
     this.add
       .text(cx, h - 40, 'Ordi : ZQSD/WASD + souris + clic · E = ultimate   |   Tablette : joysticks tactiles', {
@@ -37,5 +37,18 @@ export class MenuScene extends Phaser.Scene {
         color: '#6c6c99',
       })
       .setOrigin(0.5);
+
+    // Version affichée en bas à droite : environnement (PROD/QA/DEV) + build id.
+    const path = window.location.pathname;
+    const host = window.location.hostname;
+    const env = path.includes('/qa')
+      ? 'QA'
+      : host === 'localhost' || host === '127.0.0.1' || /^\d+\.\d+\./.test(host)
+        ? 'DEV'
+        : 'PROD';
+    const envColor = env === 'QA' ? '#ff8a3d' : env === 'PROD' ? '#46d160' : '#9b8cff';
+    this.add
+      .text(w - 12, h - 10, `${env} · ${__BUILD_ID__}`, { fontFamily: 'system-ui, sans-serif', fontSize: '13px', color: envColor })
+      .setOrigin(1, 1);
   }
 }

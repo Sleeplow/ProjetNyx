@@ -28,25 +28,23 @@ export class BotController {
   private strafeSign = 1;
   private seeded = false;
 
-  /** Petit générateur pseudo-aléatoire par bot (évite Math.random pour rester déterministe/testable). */
-  private seed: number;
-  constructor(id: string) {
-    // Graine dérivée de l'id — stable et sans dépendance à Math.random.
-    let h = 2166136261;
-    for (let i = 0; i < id.length; i++) {
-      h ^= id.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    this.seed = (h >>> 0) || 1;
+  // Personnalité tirée au hasard à la création → chaque bot (et chaque manche)
+  // joue différemment : certains collent l'adversaire, d'autres gardent leurs
+  // distances et fuient plus tôt, et ne convoitent pas les cubes de la même façon.
+  private readonly rangeMult: number; // distance de combat préférée (× portée d'attaque)
+  private readonly fleeRatio: number; // seuil de PV en dessous duquel il fuit
+  private readonly cubeReach: number; // distance max pour se détourner vers un cube
+
+  constructor(_id: string) {
+    const cautious = Math.random() < 0.5;
+    this.rangeMult = cautious ? 0.62 + Math.random() * 0.33 : 0.4 + Math.random() * 0.22;
+    this.fleeRatio = 0.2 + Math.random() * 0.25;
+    this.cubeReach = 220 + Math.random() * 320;
+    if (Math.random() < 0.5) this.strafeSign = -1;
   }
+
   private rand(): number {
-    // xorshift32
-    let x = this.seed;
-    x ^= x << 13;
-    x ^= x >>> 17;
-    x ^= x << 5;
-    this.seed = x >>> 0;
-    return this.seed / 0xffffffff;
+    return Math.random();
   }
 
   update(self: Combatant, world: BotWorld, dtMs: number): InputState {
@@ -69,10 +67,12 @@ export class BotController {
 
     const target = this.targetId ? world.all.find((c) => c.id === this.targetId && c.alive) : undefined;
 
-    // 1) Sécurité de zone : si on est hors du cercle sûr, priorité = revenir au centre.
+    // 1) Sécurité de zone. En général on rentre si on est hors du cercle sûr,
+    //    SAUF si un cube proche du bord vaut le détour (et qu'on a assez de vie).
     const dCenter = dist(self.x, self.y, world.zoneCenterX, world.zoneCenterY);
     const safeR = Math.max(60, world.zoneRadius - AI.zoneSafetyMargin);
-    const mustRetreat = dCenter > safeR;
+    const outside = dCenter > safeR;
+    const worthyCube = self.healthRatio > 0.5 ? this.outOfZoneCube(self, world) : null;
 
     let moveX = 0;
     let moveY = 0;
@@ -82,13 +82,19 @@ export class BotController {
     if (target) {
       const d = dist(self.x, self.y, target.x, target.y);
       const toT = normalize(target.x - self.x, target.y - self.y);
-      aimX = toT.x;
-      aimY = toT.y;
+      if (self.def.attack.kind === 'potion') {
+        // Vecteur NON normalisé → la potion atterrit à la distance de la cible.
+        aimX = target.x - self.x;
+        aimY = target.y - self.y;
+      } else {
+        aimX = toT.x;
+        aimY = toT.y;
+      }
 
       const isTank = self.def.role === 'tank';
-      const preferred = self.def.attack.range * (isTank ? 0.5 : 0.72);
+      const preferred = self.def.attack.range * this.rangeMult;
 
-      if (self.healthRatio < AI.fleeHealthRatio && !self.ultReady) {
+      if (self.healthRatio < this.fleeRatio && !self.ultReady) {
         // Fuite : s'éloigner de la cible.
         moveX = -toT.x;
         moveY = -toT.y;
@@ -105,6 +111,7 @@ export class BotController {
       }
 
       input.attack = d <= self.def.attack.range;
+      input.attackReleased = input.attack; // les bots « relâchent » dès qu'ils tirent (bridé par la recharge)
       input.ultimate = self.ultReady && d <= AI.ultUseRange;
     } else {
       // Pas de cible : ramasser un cube proche, sinon errer.
@@ -118,11 +125,23 @@ export class BotController {
       aimY = to.y || aimY;
     }
 
-    if (mustRetreat) {
-      // On force le retour vers le centre (l'aim/tir reste inchangé).
-      const toCenter = normalize(world.zoneCenterX - self.x, world.zoneCenterY - self.y);
-      moveX = toCenter.x;
-      moveY = toCenter.y;
+    if (outside) {
+      if (worthyCube) {
+        // Bref détour dans le danger pour aller chercher un cube intéressant.
+        const to = normalize(worthyCube.x - self.x, worthyCube.y - self.y);
+        moveX = to.x;
+        moveY = to.y;
+      } else {
+        // Sinon, retour vers la zone sûre (l'aim/tir reste inchangé).
+        const toCenter = normalize(world.zoneCenterX - self.x, world.zoneCenterY - self.y);
+        moveX = toCenter.x;
+        moveY = toCenter.y;
+      }
+    } else if (worthyCube && !target) {
+      // En sécurité mais un cube hors zone tout proche vaut le coup : on sort le chercher.
+      const to = normalize(worthyCube.x - self.x, worthyCube.y - self.y);
+      moveX = to.x;
+      moveY = to.y;
     }
 
     input.moveX = moveX;
@@ -158,12 +177,29 @@ export class BotController {
 
   private nearestCube(self: Combatant, world: BotWorld): { x: number; y: number } | null {
     let best: { x: number; y: number } | null = null;
-    let bestD = 340; // ne se détourne que pour un cube assez proche
+    let bestD = this.cubeReach; // ne se détourne que pour un cube assez proche
     for (const cube of world.cubes) {
       const d = dist(self.x, self.y, cube.x, cube.y);
       if (d < bestD) {
         bestD = d;
         best = cube;
+      }
+    }
+    return best;
+  }
+
+  /** Cube hors zone (ou au bord), proche du bot et PAS trop profond dans le danger. */
+  private outOfZoneCube(self: Combatant, world: BotWorld): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestD = Math.min(this.cubeReach, 300); // on ne s'aventure pas trop loin
+    for (const cube of world.cubes) {
+      const dToBot = dist(self.x, self.y, cube.x, cube.y);
+      if (dToBot >= bestD) continue;
+      const cubeFromCenter = dist(cube.x, cube.y, world.zoneCenterX, world.zoneCenterY);
+      // Au-delà du bord de la zone, mais pas trop enfoncé dans le danger.
+      if (cubeFromCenter > world.zoneRadius - 20 && cubeFromCenter < world.zoneRadius + 130) {
+        best = cube;
+        bestD = dToBot;
       }
     }
     return best;

@@ -28,6 +28,10 @@ export class PlayerController {
   private mouseActive = false;
   private lastAimX = 1;
   private lastAimY = 0;
+  /** Dernière visée pendant qu'on maintient l'attaque (pour lancer au bon endroit à la relâche). */
+  private heldAimX = 1;
+  private heldAimY = 0;
+  private attackWasHeld = false;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -45,15 +49,15 @@ export class PlayerController {
     kb.on('keydown-SPACE', () => (this.ultQueued = true));
 
     this.ultBtn = scene.add
-      .circle(0, 0, 46, COLORS.ultReady, 0.22)
-      .setStrokeStyle(3, COLORS.ultReady, 0.9)
+      .circle(0, 0, 54, COLORS.ultReady, 0.22)
+      .setStrokeStyle(4, COLORS.ultReady, 0.9)
       .setScrollFactor(0)
-      .setDepth(1000);
+      .setDepth(1005);
     this.ultLabel = scene.add
-      .text(0, 0, 'ULT', { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#ffcf33', fontStyle: 'bold' })
+      .text(0, 0, 'ULT', { fontFamily: 'system-ui, sans-serif', fontSize: '20px', color: '#ffcf33', fontStyle: 'bold' })
       .setOrigin(0.5)
       .setScrollFactor(0)
-      .setDepth(1001);
+      .setDepth(1006);
     this.layout();
 
     scene.scale.on('resize', this.layout, this);
@@ -66,15 +70,19 @@ export class PlayerController {
   private layout(): void {
     const w = this.scene.scale.width;
     const h = this.scene.scale.height;
-    this.ultBtn.setPosition(w - 82, h - 90);
-    this.ultLabel.setPosition(w - 82, h - 90);
+    this.ultBtn.setPosition(w - 96, h - 104);
+    this.ultLabel.setPosition(w - 96, h - 104);
   }
 
+  /** Appui sur le bouton ULT lui-même (petite tolérance pour le doigt). */
   private overUltBtn(x: number, y: number): boolean {
-    return Math.hypot(x - this.ultBtn.x, y - this.ultBtn.y) <= this.ultBtn.radius + 6;
+    return Math.hypot(x - this.ultBtn.x, y - this.ultBtn.y) <= this.ultBtn.radius + 12;
   }
 
   private onDown(pointer: Phaser.Input.Pointer): void {
+    // Le bouton ULT est prioritaire : un appui DESSUS déclenche l'ultimate et
+    // ne crée jamais de joystick. Tout le reste du coin reste dispo pour viser
+    // (le joystick n'est bloqué que sur le bouton lui-même).
     if (this.overUltBtn(pointer.x, pointer.y)) {
       this.ultQueued = true;
       return;
@@ -128,34 +136,61 @@ export class PlayerController {
     }
 
     // --- Visée + tir ---
-    let aimSet = false;
+    // Pour une potion (kind 'potion'), le vecteur de visée porte AUSSI la distance :
+    // souris = distance au curseur ; joystick = amplitude du stick mappée sur la portée.
+    const isPotion = player.def.attack.kind === 'potion';
+    let attacking = false;
+    let aimX = this.lastAimX;
+    let aimY = this.lastAimY;
+
     if (this.aimStick.active && this.aimStick.magnitude > 0.2) {
-      input.aimX = this.aimStick.vecX;
-      input.aimY = this.aimStick.vecY;
-      input.attack = true;
-      aimSet = true;
+      const m = this.aimStick.magnitude;
+      const nx = this.aimStick.vecX / m;
+      const ny = this.aimStick.vecY / m;
+      if (isPotion) {
+        const range = player.def.attack.range;
+        const t = Phaser.Math.Clamp((m - 0.2) / 0.8, 0, 1);
+        const throwD = Phaser.Math.Linear(range * 0.4, range, t);
+        aimX = nx * throwD;
+        aimY = ny * throwD;
+      } else {
+        aimX = nx;
+        aimY = ny;
+      }
+      attacking = true;
     } else if (this.mouseActive) {
       const mp = this.scene.input.mousePointer;
       const ax = mp.worldX - player.x;
       const ay = mp.worldY - player.y;
       if (Math.hypot(ax, ay) > 1) {
-        input.aimX = ax;
-        input.aimY = ay;
-        aimSet = true;
+        aimX = ax;
+        aimY = ay;
       }
-      input.attack = mp.leftButtonDown();
+      attacking = mp.leftButtonDown();
+    } else if (input.moveX !== 0 || input.moveY !== 0) {
+      aimX = input.moveX;
+      aimY = input.moveY;
     }
-    if (!aimSet) {
-      if (input.moveX !== 0 || input.moveY !== 0) {
-        input.aimX = input.moveX;
-        input.aimY = input.moveY;
-      } else {
-        input.aimX = this.lastAimX;
-        input.aimY = this.lastAimY;
-      }
+
+    // On mémorise la visée tant qu'on charge, et on détecte la relâche.
+    if (attacking) {
+      this.heldAimX = aimX;
+      this.heldAimY = aimY;
     }
-    this.lastAimX = input.aimX;
-    this.lastAimY = input.aimY;
+    const released = this.attackWasHeld && !attacking;
+    this.attackWasHeld = attacking;
+    // Au moment de relâcher, on lance là où on visait pendant la charge.
+    if (released) {
+      aimX = this.heldAimX;
+      aimY = this.heldAimY;
+    }
+
+    input.aimX = aimX;
+    input.aimY = aimY;
+    input.attack = attacking;
+    input.attackReleased = released;
+    this.lastAimX = aimX;
+    this.lastAimY = aimY;
 
     // --- Ultimate (front montant) ---
     if (this.ultQueued) {

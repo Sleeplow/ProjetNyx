@@ -12,6 +12,7 @@ export const COLORS = {
   zoneBorder: 0x9b4dff,
   zoneDanger: 0x4a1d7a,
   powerCube: 0x66e0ff,
+  poison: 0x86e05a,
   playerAccent: 0xffe066,
   healthGood: 0x46d160,
   healthLow: 0xe0473a,
@@ -49,6 +50,18 @@ export const POWER_CUBE = {
   pickupRadius: 26,
   /** Rayon visuel du cube (px). */
   radius: 12,
+  /** Un cube resté hors de la zone sûre disparaît après ce délai (ms). */
+  outsideDespawnMs: 5000,
+  /** Délai avant que les cubes « en trop » d'un combattant mort réapparaissent au hasard (ms). */
+  respawnDelayMs: 5000,
+} as const;
+
+/** Régénération de vie hors combat (comme dans Brawl Stars). */
+export const REGEN = {
+  /** Délai sans tirer ni subir de dégâts avant que la régén démarre (ms). */
+  delayMs: 1500,
+  /** Fraction des PV max régénérée par seconde une fois la régén active. */
+  percentPerSecond: 0.05,
 } as const;
 
 /** Réglages des buissons (cachette). */

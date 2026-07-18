@@ -2,10 +2,12 @@ import Phaser from 'phaser';
 import { ZAREKS } from '../zareks/registry';
 import type { ZarekDef } from '../core/types';
 import { makeButton, nightBackground } from '../ui/widgets';
+import { MODES } from '../modes/registry';
 
 /** Écran de sélection du Zarek. */
 export class SelectScene extends Phaser.Scene {
   private selectedId = ZAREKS[0].id;
+  private modeId = MODES[0].id;
   private details!: Phaser.GameObjects.Text;
   private cardBorders: Map<string, Phaser.GameObjects.Rectangle> = new Map();
 
@@ -13,17 +15,22 @@ export class SelectScene extends Phaser.Scene {
     super('Select');
   }
 
-  create(): void {
+  create(data: { modeId?: string }): void {
     nightBackground(this);
     const w = this.scale.width;
     const h = this.scale.height;
     const cx = w / 2;
 
+    this.modeId = data?.modeId ?? MODES[0].id;
+    const mode = MODES.find((m) => m.id === this.modeId) ?? MODES[0];
+
     this.add.text(cx, 60, 'CHOISIS TON ZAREK', { fontFamily: 'system-ui, sans-serif', fontSize: '40px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-    this.add.text(cx, 104, 'Mode : Battle Royale — dernier survivant', { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#9b8cff' }).setOrigin(0.5);
+    this.add.text(cx, 104, `Mode : ${mode.name} — ${mode.tagline}`, { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#9b8cff' }).setOrigin(0.5);
+    // Retour au sélecteur de mode.
+    makeButton(this, 96, 48, 150, 46, '‹ Retour', () => this.scene.start('ModeSelect'), 0x3a3466);
 
     // Cartes : les Zareks jouables + des emplacements verrouillés (extension future).
-    const lockedSlots = 3;
+    const lockedSlots = 2;
     const total = ZAREKS.length + lockedSlots;
     const cardW = 150;
     const gap = 18;
@@ -44,7 +51,7 @@ export class SelectScene extends Phaser.Scene {
       .text(cx, h * 0.6, '', { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#d8d8ff', align: 'center', lineSpacing: 5, wordWrap: { width: Math.min(760, w - 60) } })
       .setOrigin(0.5, 0);
 
-    makeButton(this, cx, h - 58, 280, 62, 'LANCER LA PARTIE', () => this.scene.start('Game', { zarekId: this.selectedId }));
+    makeButton(this, cx, h - 58, 280, 62, 'LANCER LA PARTIE', () => this.scene.start('Game', { zarekId: this.selectedId, modeId: this.modeId }));
 
     this.refresh();
   }
@@ -94,5 +101,7 @@ function roleLabel(role: ZarekDef['role']): string {
       return 'Assassin';
     case 'support':
       return 'Soutien';
+    case 'mage':
+      return 'Mage';
   }
 }

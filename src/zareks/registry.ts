@@ -1,6 +1,7 @@
 import type { ZarekDef } from '../core/types';
 import { ZEPHYR } from './zephyr';
 import { ATLAS } from './atlas';
+import { HECATE } from './hecate';
 
 /**
  * Registre des Zareks jouables.
@@ -9,7 +10,7 @@ import { ATLAS } from './atlas';
  * `ZarekDef`, importe-le ici et ajoute-le à la liste. Rien d'autre à toucher :
  * la sélection, le HUD et le combat le prennent en charge automatiquement.
  */
-export const ZAREKS: ZarekDef[] = [ZEPHYR, ATLAS];
+export const ZAREKS: ZarekDef[] = [ZEPHYR, ATLAS, HECATE];
 
 /** Ordre des Zareks utilisés pour les NPC (rotation). */
 export const ZAREK_BY_ID: Record<string, ZarekDef> = Object.fromEntries(

@@ -67,10 +67,12 @@ export class BotController {
 
     const target = this.targetId ? world.all.find((c) => c.id === this.targetId && c.alive) : undefined;
 
-    // 1) Sécurité de zone : si on est hors du cercle sûr, priorité = revenir au centre.
+    // 1) Sécurité de zone. En général on rentre si on est hors du cercle sûr,
+    //    SAUF si un cube proche du bord vaut le détour (et qu'on a assez de vie).
     const dCenter = dist(self.x, self.y, world.zoneCenterX, world.zoneCenterY);
     const safeR = Math.max(60, world.zoneRadius - AI.zoneSafetyMargin);
-    const mustRetreat = dCenter > safeR;
+    const outside = dCenter > safeR;
+    const worthyCube = self.healthRatio > 0.5 ? this.outOfZoneCube(self, world) : null;
 
     let moveX = 0;
     let moveY = 0;
@@ -123,11 +125,23 @@ export class BotController {
       aimY = to.y || aimY;
     }
 
-    if (mustRetreat) {
-      // On force le retour vers le centre (l'aim/tir reste inchangé).
-      const toCenter = normalize(world.zoneCenterX - self.x, world.zoneCenterY - self.y);
-      moveX = toCenter.x;
-      moveY = toCenter.y;
+    if (outside) {
+      if (worthyCube) {
+        // Bref détour dans le danger pour aller chercher un cube intéressant.
+        const to = normalize(worthyCube.x - self.x, worthyCube.y - self.y);
+        moveX = to.x;
+        moveY = to.y;
+      } else {
+        // Sinon, retour vers la zone sûre (l'aim/tir reste inchangé).
+        const toCenter = normalize(world.zoneCenterX - self.x, world.zoneCenterY - self.y);
+        moveX = toCenter.x;
+        moveY = toCenter.y;
+      }
+    } else if (worthyCube && !target) {
+      // En sécurité mais un cube hors zone tout proche vaut le coup : on sort le chercher.
+      const to = normalize(worthyCube.x - self.x, worthyCube.y - self.y);
+      moveX = to.x;
+      moveY = to.y;
     }
 
     input.moveX = moveX;
@@ -169,6 +183,23 @@ export class BotController {
       if (d < bestD) {
         bestD = d;
         best = cube;
+      }
+    }
+    return best;
+  }
+
+  /** Cube hors zone (ou au bord), proche du bot et PAS trop profond dans le danger. */
+  private outOfZoneCube(self: Combatant, world: BotWorld): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestD = Math.min(this.cubeReach, 300); // on ne s'aventure pas trop loin
+    for (const cube of world.cubes) {
+      const dToBot = dist(self.x, self.y, cube.x, cube.y);
+      if (dToBot >= bestD) continue;
+      const cubeFromCenter = dist(cube.x, cube.y, world.zoneCenterX, world.zoneCenterY);
+      // Au-delà du bord de la zone, mais pas trop enfoncé dans le danger.
+      if (cubeFromCenter > world.zoneRadius - 20 && cubeFromCenter < world.zoneRadius + 130) {
+        best = cube;
+        bestD = dToBot;
       }
     }
     return best;

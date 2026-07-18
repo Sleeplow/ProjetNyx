@@ -11,7 +11,7 @@ import { PlayerController } from '../input/PlayerController';
 import { Hud } from '../ui/Hud';
 import { ARENA_ROYALE } from '../maps/arenaRoyale';
 import { ZAREKS, getZarek } from '../zareks/registry';
-import { COLORS, POWER_CUBE, PLAYERS_PER_MATCH } from '../config/constants';
+import { COLORS, POWER_CUBE, PLAYERS_PER_MATCH, BUSH } from '../config/constants';
 import { clamp, dist, normalize, resolveCircleRect, pointInRect, circleHitsRect } from '../core/geometry';
 
 const TAU = Math.PI * 2;
@@ -279,8 +279,12 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 9) Rendu des combattants.
-    for (const c of this.combatants) if (c.alive || c.isPlayer) c.syncDisplay();
+    // 9) Rendu des combattants (furtivité : un ennemi caché n'est visible que de près).
+    for (const c of this.combatants) {
+      if (!(c.alive || c.isPlayer)) continue;
+      const revealed = c.isPlayer || !c.inBush || dist(c.x, c.y, this.player.x, this.player.y) <= BUSH.revealRange;
+      c.syncDisplay(revealed);
+    }
 
     // 10) Caméra (suivi lissé du joueur).
     this.camX = Phaser.Math.Linear(this.camX, this.player.x, 0.1);

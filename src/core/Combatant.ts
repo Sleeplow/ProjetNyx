@@ -178,12 +178,16 @@ export class Combatant {
     this.kbY += dirY * force;
   }
 
-  /** Ramasse un cube de power-up : augmente PV max + dégâts, et soigne un peu. */
+  /**
+   * Ramasse un cube : augmente PV max + dégâts, avec seulement un PETIT soin
+   * (pas un remplissage complet). Il faut se régénérer (hors combat) pour
+   * combler le reste jusqu'au nouveau max (ex. 1000/1000 + cube → ~1030/1200).
+   */
   pickCube(): void {
     const beforeMax = this.maxHealth;
     this.cubes += 1;
     const gained = this.maxHealth - beforeMax;
-    this.health = Math.min(this.maxHealth, this.health + gained + beforeMax * 0.05);
+    this.health = Math.min(this.maxHealth, this.health + gained * 0.35);
   }
 
   tickTimers(dtMs: number): void {
@@ -203,8 +207,11 @@ export class Combatant {
     this.health = Math.min(this.maxHealth, this.health + this.maxHealth * REGEN.percentPerSecond * (dtMs / 1000));
   }
 
-  /** Met à jour l'affichage à partir de l'état. */
-  syncDisplay(): void {
+  /**
+   * Met à jour l'affichage. `revealedToPlayer` indique si ce combattant est
+   * visible du point de vue du joueur (calculé par la scène).
+   */
+  syncDisplay(revealedToPlayer: boolean): void {
     this.container.setPosition(this.x, this.y);
     this.barrel.setRotation(this.aimAngle);
 
@@ -212,14 +219,18 @@ export class Combatant {
     this.hpFill.fillColor = this.healthRatio > 0.35 ? COLORS.healthGood : COLORS.healthLow;
 
     this.cubeText.setText(this.cubes > 0 ? `◆${this.cubes}` : '');
-
-    // Halo affiché uniquement quand l'ult est chargé.
     this.ultGlow.setVisible(this.ultReady && this.alive);
 
-    // Rendu « caché dans un buisson » : le joueur reste bien visible, les NPC s'estompent.
-    const hidden = this.inBush;
-    const alpha = hidden ? (this.isPlayer ? 0.6 : 0.28) : 1;
-    this.container.setAlpha(alpha);
+    // Furtivité symétrique : un ennemi dans un buisson est INVISIBLE pour le
+    // joueur tant qu'il n'est pas révélé (de près) — comme le joueur l'est pour
+    // les bots. Le joueur se voit toujours, juste estompé quand il est caché.
+    if (this.isPlayer) {
+      this.container.setVisible(true).setAlpha(this.inBush ? 0.55 : 1);
+    } else if (this.inBush && !revealedToPlayer) {
+      this.container.setVisible(false);
+    } else {
+      this.container.setVisible(true).setAlpha(this.inBush ? 0.5 : 1);
+    }
   }
 
   destroy(): void {

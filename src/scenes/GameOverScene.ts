@@ -38,8 +38,10 @@ export class GameOverScene extends Phaser.Scene {
     this.add.text(cx, h * 0.3 + 70, subtitle, { fontFamily: 'system-ui, sans-serif', fontSize: '28px', color: '#d8d8ff' }).setOrigin(0.5);
 
     const replayScene = isSoccer ? 'Soccer' : 'Game';
-    makeButton(this, cx - 160, h * 0.62, 280, 66, 'REJOUER', () => this.scene.start(replayScene, { zarekId: data.zarekId, modeId: data.modeId }));
-    makeButton(this, cx + 160, h * 0.62, 280, 66, 'MENU', () => this.scene.start('Menu'), 0x3a3466);
+    // Boutons bien espacés : leurs zones de clic ne doivent pas se toucher, sinon
+    // un tap près du centre risque de déclencher le mauvais (REJOUER ↔ MENU).
+    makeButton(this, cx - 200, h * 0.62, 280, 66, 'REJOUER', () => this.scene.start(replayScene, { zarekId: data.zarekId, modeId: data.modeId }));
+    makeButton(this, cx + 200, h * 0.62, 280, 66, 'MENU', () => this.scene.start('Menu'), 0x3a3466);
   }
 }
 

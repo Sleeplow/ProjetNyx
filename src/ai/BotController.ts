@@ -109,6 +109,7 @@ export class BotController {
       }
 
       input.attack = d <= self.def.attack.range;
+      input.attackReleased = input.attack; // les bots « relâchent » dès qu'ils tirent (bridé par la recharge)
       input.ultimate = self.ultReady && d <= AI.ultUseRange;
     } else {
       // Pas de cible : ramasser un cube proche, sinon errer.

@@ -16,15 +16,17 @@ export interface InputState {
   /** Direction de visée (vecteur, pas forcément normalisé). */
   aimX: number;
   aimY: number;
-  /** Le combattant veut déclencher son attaque de base. */
+  /** Le combattant maintient/veut son attaque de base (tir continu, ou visée d'une potion). */
   attack: boolean;
+  /** L'attaque vient d'être RELÂCHÉE cette frame (déclenche le lancer de potion visé). */
+  attackReleased: boolean;
   /** Le combattant veut déclencher son ultimate. */
   ultimate: boolean;
 }
 
 /** Crée un InputState neutre (aucune action). */
 export function emptyInput(): InputState {
-  return { moveX: 0, moveY: 0, aimX: 1, aimY: 0, attack: false, ultimate: false };
+  return { moveX: 0, moveY: 0, aimX: 1, aimY: 0, attack: false, attackReleased: false, ultimate: false };
 }
 
 /** Rôle d'un Zarek — sert à l'équilibrage et à l'IA. */

@@ -30,6 +30,7 @@ export class GameScene extends Phaser.Scene {
   private projectiles: Projectile[] = [];
   private cubes: PowerCube[] = [];
   private hazards: HazardZone[] = [];
+  private aimReticle!: Phaser.GameObjects.Arc;
   private playerController!: PlayerController;
   private hud!: Hud;
 
@@ -66,6 +67,8 @@ export class GameScene extends Phaser.Scene {
 
     this.playerController = new PlayerController(this);
     this.hud = new Hud(this);
+    // Repère de visée (aperçu de la flaque de potion pendant la charge).
+    this.aimReticle = this.add.circle(0, 0, 10, COLORS.poison, 0.12).setStrokeStyle(2, COLORS.poison, 0.9).setDepth(13).setVisible(false);
 
     this.camX = this.player.x;
     this.camY = this.player.y;
@@ -214,9 +217,14 @@ export class GameScene extends Phaser.Scene {
     for (const c of this.combatants) {
       if (!c.alive) continue;
       const inp = inputs.get(c.id)!;
-      if (inp.attack && c.reloadTimer <= 0) this.fireAttack(c);
+      // Potion : on lance à la RELÂCHE (visée maintenue). Autres : tir continu maintenu.
+      const wantsAttack = c.def.attack.kind === 'potion' ? inp.attackReleased : inp.attack;
+      if (wantsAttack && c.reloadTimer <= 0) this.fireAttack(c);
       if (inp.ultimate && c.ultReady) this.fireUlt(c);
     }
+
+    // Repère de visée de la potion (aperçu de la zone tant que le joueur charge).
+    this.updateAimReticle(inputs.get(this.player.id));
 
     // 4) Timers.
     for (const c of this.combatants) if (c.alive) c.tickTimers(dtMs);
@@ -333,7 +341,17 @@ export class GameScene extends Phaser.Scene {
       }
 
       if (isPotion) {
-        // Une potion ne touche personne en vol : elle crée sa flaque en atterrissant.
+        // Si la potion croise un ennemi en vol, elle s'arrête et tombe LÀ.
+        if (!landed) {
+          for (const c of this.combatants) {
+            if (!c.alive || c.id === p.ownerId) continue;
+            if (dist(p.x, p.y, c.x, c.y) <= p.radius + c.def.radius) {
+              p.kill();
+              landed = true;
+              break;
+            }
+          }
+        }
         if (landed) this.spawnPotionPuddle(p);
         continue;
       }
@@ -417,8 +435,7 @@ export class GameScene extends Phaser.Scene {
     const a = c.def.attack;
     const dx = Math.cos(c.aimAngle);
     const dy = Math.sin(c.aimAngle);
-    // Distance de lancer = distance visée (souris / IA), sinon portée max (joystick).
-    const throwDist = c.aimDist > 40 ? clamp(c.aimDist, 90, a.range) : a.range;
+    const throwDist = this.potionThrowDist(c);
     const muzzle = c.def.radius + 6;
     const proj = new Projectile(this, c.id, c.x + dx * muzzle, c.y + dy * muzzle, dx * a.speed, dy * a.speed, 0, a.projRadius, throwDist, c.def.color);
     proj.landsInto = {
@@ -427,6 +444,29 @@ export class GameScene extends Phaser.Scene {
       dps: (a.aoeDps ?? 120) * c.damageMult,
     };
     this.projectiles.push(proj);
+  }
+
+  /** Distance de lancer d'une potion : distance visée (souris/IA) sinon portée max. */
+  private potionThrowDist(c: Combatant): number {
+    const range = c.def.attack.range;
+    return c.aimDist > 40 ? clamp(c.aimDist, 90, range) : range;
+  }
+
+  /** Point d'atterrissage visé de la potion (sans tenir compte d'un joueur croisé). */
+  private potionLanding(c: Combatant): { x: number; y: number } {
+    const d = this.potionThrowDist(c);
+    return { x: c.x + Math.cos(c.aimAngle) * d, y: c.y + Math.sin(c.aimAngle) * d };
+  }
+
+  /** Affiche le repère de visée (aperçu de la flaque) tant que le joueur charge une potion. */
+  private updateAimReticle(inp?: InputState): void {
+    const p = this.player;
+    if (inp && p.alive && p.def.attack.kind === 'potion' && inp.attack) {
+      const land = this.potionLanding(p);
+      this.aimReticle.setPosition(land.x, land.y).setRadius(p.def.attack.aoeRadius ?? 80).setVisible(true);
+    } else {
+      this.aimReticle.setVisible(false);
+    }
   }
 
   private spawnPotionPuddle(p: Projectile): void {

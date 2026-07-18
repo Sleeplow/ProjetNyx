@@ -27,3 +27,11 @@ const config: Phaser.Types.Core.GameConfig = {
 
 // eslint-disable-next-line no-new
 new Phaser.Game(config);
+
+// Service worker (production uniquement) : app installable (PWA) + hors-ligne.
+// Enregistré en relatif → fonctionne à la racine (prod) comme dans /qa/.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}

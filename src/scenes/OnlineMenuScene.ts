@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { makeButton, nightBackground } from '../ui/widgets';
 import { NetClient } from '../net/NetClient';
+import { serverUrl } from '../net/config';
 import type { Room } from 'colyseus.js';
 
 /**
@@ -13,6 +14,7 @@ export class OnlineMenuScene extends Phaser.Scene {
   private nameInput!: HTMLInputElement;
   private codeInput!: HTMLInputElement;
   private status!: Phaser.GameObjects.Text;
+  private serverText!: Phaser.GameObjects.Text;
   private busy = false;
 
   constructor() {
@@ -45,6 +47,14 @@ export class OnlineMenuScene extends Phaser.Scene {
     makeButton(this, 96, 48, 150, 46, '‹ Menu', () => this.scene.start('Menu'), 0x3a3466);
 
     this.status = this.add.text(cx, h * 0.93, '', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#ffcf33' }).setOrigin(0.5);
+
+    // Serveur ciblé (modifiable d'un tap) — pratique pour brancher un tunnel.
+    this.serverText = this.add
+      .text(cx, h - 16, '', { fontFamily: 'system-ui, sans-serif', fontSize: '13px', color: '#6c6c99' })
+      .setOrigin(0.5, 1)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerup', () => this.changeServer());
+    this.refreshServerText();
 
     this.layoutInputs();
     this.scale.on('resize', this.layoutInputs, this);
@@ -79,6 +89,26 @@ export class OnlineMenuScene extends Phaser.Scene {
 
   private setStatus(text: string, color: string): void {
     this.status.setText(text).setColor(color);
+  }
+
+  private refreshServerText(): void {
+    this.serverText.setText(`Serveur : ${serverUrl()}  (toucher pour changer)`);
+  }
+
+  /** Change l'URL du serveur (mémorisée) — utile pour brancher un tunnel wss://. */
+  private changeServer(): void {
+    const next = window.prompt('Adresse du serveur (ex. wss://mon-tunnel.trycloudflare.com)', serverUrl());
+    if (next === null) return;
+    const v = next.trim();
+    try {
+      if (v) localStorage.setItem('nyxt.server', v);
+      else localStorage.removeItem('nyxt.server');
+    } catch {
+      /* localStorage indisponible */
+    }
+    this.net = new NetClient();
+    this.refreshServerText();
+    this.setStatus('Serveur mis à jour.', '#46d160');
   }
 
   private makeInput(placeholder: string, maxLen: number, value: string): HTMLInputElement {

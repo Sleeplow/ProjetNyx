@@ -1,15 +1,36 @@
+const STORAGE_KEY = 'nyxt.server';
+
 /**
- * URL du serveur temps-réel. En dev local on tape le serveur local ; en prod on
- * pointera vers la machine hôte (l'iMac), fixée via la variable d'env Vite
- * `VITE_NYXT_SERVER` au build (ex. wss://nyxt-serveur.exemple).
+ * URL du serveur temps-réel, configurable À L'EXÉCUTION (sans re-déployer) :
+ *
+ *  1. `?server=wss://…` dans l'URL → mémorisé (pratique pour un tunnel dont
+ *     l'adresse change, et facile à partager à un ami). `?server=reset` efface.
+ *  2. sinon, la dernière valeur mémorisée (localStorage).
+ *  3. sinon, la valeur figée au build (`VITE_NYXT_SERVER`).
+ *  4. sinon, le serveur local (dev).
  */
 export function serverUrl(): string {
+  if (typeof location !== 'undefined') {
+    const q = new URLSearchParams(location.search).get('server');
+    if (q) {
+      try {
+        if (q === 'reset') localStorage.removeItem(STORAGE_KEY);
+        else localStorage.setItem(STORAGE_KEY, q);
+      } catch {
+        /* localStorage indisponible */
+      }
+    }
+  }
+
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return saved;
+  } catch {
+    /* localStorage indisponible */
+  }
+
   const configured = import.meta.env.VITE_NYXT_SERVER as string | undefined;
   if (configured) return configured;
-  if (typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
-    return 'ws://localhost:2567';
-  }
-  // Défaut tant que l'hôte public n'est pas configuré (le mode en ligne
-  // affichera alors une erreur de connexion, ce qui est attendu).
+
   return 'ws://localhost:2567';
 }

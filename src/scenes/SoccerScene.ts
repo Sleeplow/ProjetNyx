@@ -185,7 +185,7 @@ export class SoccerScene extends Phaser.Scene {
     // Balle : collée au porteur, sinon physique libre (seulement en jeu).
     if (!this.ball.free) {
       const carrier = this.combatants.find((c) => c.id === this.ball.carrierId);
-      if (carrier && carrier.alive) this.ball.attachTo(carrier.x, carrier.y, carrier.aimAngle, carrier.def.radius);
+      if (carrier && carrier.alive) this.ball.attachTo(carrier.x, carrier.y, carrier.aimAngle, carrier.def.radius, this.pitch.map.obstacles);
       else this.ball.carrierId = null;
     }
     if (!frozen) {
@@ -257,6 +257,7 @@ export class SoccerScene extends Phaser.Scene {
       ball: { x: this.ball.x, y: this.ball.y, carrierId: this.ball.carrierId, free: this.ball.free },
       leftGoal: { x: this.pitch.leftGoal.centerX, y: this.pitch.leftGoal.centerY },
       rightGoal: { x: this.pitch.rightGoal.centerX, y: this.pitch.rightGoal.centerY },
+      obstacles: this.pitch.map.obstacles,
       width: this.pitch.map.width,
       height: this.pitch.map.height,
       frozen: false,

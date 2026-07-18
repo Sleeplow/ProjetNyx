@@ -1,9 +1,9 @@
 import type { Combatant } from '../core/Combatant';
-import type { InputState } from '../core/types';
+import type { InputState, Rect } from '../core/types';
 import { emptyInput } from '../core/types';
 import { AI } from '../config/constants';
 import { SOCCER } from '../config/soccer';
-import { dist, normalize } from '../core/geometry';
+import { dist, normalize, circleHitsRect } from '../core/geometry';
 
 /** Ce que l'IA foot doit connaître de la scène, fourni chaque frame. */
 export interface SoccerWorld {
@@ -12,6 +12,8 @@ export interface SoccerWorld {
   /** Centres des deux buts : [gauche, droite]. */
   leftGoal: { x: number; y: number };
   rightGoal: { x: number; y: number };
+  /** Murs et blocs, pour l'évitement d'obstacles. */
+  obstacles: Rect[];
   width: number;
   height: number;
   /** Le jeu est en pause (engagement / célébration de but). */
@@ -92,11 +94,36 @@ export class SoccerBot {
       }
     }
 
-    input.moveX = moveX;
-    input.moveY = moveY;
+    // Évitement d'obstacles : sans ça, le bot pousse tout droit dans un mur et
+    // reste coincé. On dévie le déplacement pour contourner (la visée/tir garde
+    // sa direction, indépendante).
+    const av = this.avoid(self, moveX, moveY, world.obstacles);
+    input.moveX = av.x;
+    input.moveY = av.y;
     input.aimX = aimX;
     input.aimY = aimY;
     return input;
+  }
+
+  /**
+   * Steering par « whiskers » : on sonde devant soi ; si c'est bloqué, on
+   * essaie des directions de plus en plus déviées (gauche/droite) et on prend
+   * la première dégagée. Le bot longe le mur au lieu de s'y écraser.
+   */
+  private avoid(self: Combatant, mx: number, my: number, obstacles: Rect[]): { x: number; y: number } {
+    if (mx === 0 && my === 0) return { x: 0, y: 0 };
+    const base = Math.atan2(my, mx);
+    const probe = self.def.radius + 46;
+    const offsets = [0, 0.45, -0.45, 0.9, -0.9, 1.4, -1.4, 1.9, -1.9];
+    for (const off of offsets) {
+      const a = base + off;
+      const px = self.x + Math.cos(a) * probe;
+      const py = self.y + Math.sin(a) * probe;
+      if (!obstacles.some((o) => circleHitsRect(px, py, self.def.radius, o))) {
+        return { x: Math.cos(a), y: Math.sin(a) };
+      }
+    }
+    return { x: mx, y: my };
   }
 
   /** Où se déplacer quand je ne porte pas la balle, selon la situation et mon rôle. */

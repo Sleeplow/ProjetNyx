@@ -42,11 +42,27 @@ export class Ball {
     return this.carrierId === null;
   }
 
-  /** Place la balle devant un porteur (appelé chaque frame par la scène). */
-  attachTo(px: number, py: number, aimAngle: number, carrierRadius: number): void {
-    const d = carrierRadius + this.radius + BALL.carryOffset;
-    this.x = px + Math.cos(aimAngle) * d;
-    this.y = py + Math.sin(aimAngle) * d;
+  /**
+   * Place la balle devant un porteur (appelé chaque frame par la scène).
+   * Placement « balayé » : on avance depuis le porteur et on s'arrête AVANT le
+   * premier mur — la balle portée ne peut donc jamais traverser un obstacle
+   * (ni servir à marquer au travers).
+   */
+  attachTo(px: number, py: number, aimAngle: number, carrierRadius: number, obstacles: Rect[]): void {
+    const maxD = carrierRadius + this.radius + BALL.carryOffset;
+    const dx = Math.cos(aimAngle);
+    const dy = Math.sin(aimAngle);
+    let placedX = px;
+    let placedY = py;
+    for (let t = 6; t <= maxD; t += 6) {
+      const cx = px + dx * t;
+      const cy = py + dy * t;
+      if (obstacles.some((o) => circleHitsRect(cx, cy, this.radius, o))) break;
+      placedX = cx;
+      placedY = cy;
+    }
+    this.x = placedX;
+    this.y = placedY;
     this.vx = 0;
     this.vy = 0;
   }
@@ -78,8 +94,33 @@ export class Ball {
     if (this.kickerLockMs > 0) this.kickerLockMs = Math.max(0, this.kickerLockMs - dtMs);
     if (!this.free) return;
 
-    this.x += this.vx * dtSec;
-    this.y += this.vy * dtSec;
+    // Déplacement SOUS-ÉCHANTILLONNÉ : un tir rapide (~1050 px/s) parcourt ~52 px
+    // sur une frame de 50 ms, soit plus qu'un mur (44 px) — un seul pas le ferait
+    // « sauter » par-dessus (tunneling). On découpe en pas ≤ 16 px (< épaisseur
+    // d'un mur) : la balle chevauche donc toujours l'obstacle et rebondit bien.
+    const dist = Math.hypot(this.vx, this.vy) * dtSec;
+    const steps = Math.max(1, Math.ceil(dist / (this.radius * 0.8)));
+    const sdt = dtSec / steps;
+    for (let k = 0; k < steps; k++) {
+      this.x += this.vx * sdt;
+      this.y += this.vy * sdt;
+      for (const ob of obstacles) {
+        if (!circleHitsRect(this.x, this.y, this.radius, ob)) continue;
+        const res = resolveCircleRect(this.x, this.y, this.radius, ob);
+        if (!res) continue;
+        const n = normalize(res.x - this.x, res.y - this.y);
+        this.x = res.x;
+        this.y = res.y;
+        const dot = this.vx * n.x + this.vy * n.y;
+        if (dot < 0) {
+          this.vx -= (1 + BALL.restitution) * dot * n.x;
+          this.vy -= (1 + BALL.restitution) * dot * n.y;
+        }
+      }
+      // Bornes extérieures du terrain (le centre peut atteindre les buts).
+      this.x = clamp(this.x, this.radius, width - this.radius);
+      this.y = clamp(this.y, this.radius, height - this.radius);
+    }
 
     const decay = Math.exp(-BALL.friction * dtSec);
     this.vx *= decay;
@@ -88,27 +129,6 @@ export class Ball {
       this.vx = 0;
       this.vy = 0;
     }
-
-    // Rebonds sur les murs et obstacles.
-    for (const ob of obstacles) {
-      if (!circleHitsRect(this.x, this.y, this.radius, ob)) continue;
-      const res = resolveCircleRect(this.x, this.y, this.radius, ob);
-      if (!res) continue;
-      const nx = res.x - this.x;
-      const ny = res.y - this.y;
-      const n = normalize(nx, ny);
-      this.x = res.x;
-      this.y = res.y;
-      const dot = this.vx * n.x + this.vy * n.y;
-      if (dot < 0) {
-        this.vx -= (1 + BALL.restitution) * dot * n.x;
-        this.vy -= (1 + BALL.restitution) * dot * n.y;
-      }
-    }
-
-    // Bornes extérieures du terrain (le centre peut atteindre les buts).
-    this.x = clamp(this.x, this.radius, width - this.radius);
-    this.y = clamp(this.y, this.radius, height - this.radius);
   }
 
   syncDisplay(): void {

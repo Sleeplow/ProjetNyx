@@ -1,0 +1,85 @@
+name: CI / Deploy (prod + QA)
+
+# Stratégie :
+#   - PR (vers main ou qa) et pushes : job `build` = validation (typecheck + build).
+#   - push sur `main` → déploie la PROD à la RACINE de la branche gh-pages.
+#   - push sur `qa`   → déploie la QA dans le sous-dossier /qa/ de gh-pages.
+# La source de GitHub Pages doit être : "Deploy from a branch" → gh-pages → / (root).
+on:
+  push:
+    branches: [main, qa]
+  pull_request:
+    branches: [main, qa]
+  workflow_dispatch:
+
+# Droit d'écriture pour pousser sur la branche gh-pages.
+permissions:
+  contents: write
+
+# Annule les runs redondants d'une même branche.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Validation : tourne sur tout (PR incluses). Un build cassé bloque le déploiement.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+  # PROD : racine de gh-pages. `clean-exclude` préserve le dossier /qa/.
+  deploy-prod:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Deploy prod to gh-pages root
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: dist
+          clean: true
+          clean-exclude: |
+            qa
+            qa/**
+
+  # QA : sous-dossier /qa/ de gh-pages (le nettoyage reste circonscrit à /qa/).
+  deploy-qa:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/qa'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Deploy QA to gh-pages /qa
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: dist
+          target-folder: qa

@@ -51,6 +51,14 @@ export const POWER_CUBE = {
   radius: 12,
 } as const;
 
+/** Régénération de vie hors combat (comme dans Brawl Stars). */
+export const REGEN = {
+  /** Délai sans tirer ni subir de dégâts avant que la régén démarre (ms). */
+  delayMs: 2500,
+  /** Fraction des PV max régénérée par seconde une fois la régén active. */
+  percentPerSecond: 0.1,
+} as const;
+
 /** Réglages des buissons (cachette). */
 export const BUSH = {
   /** Distance en deçà de laquelle un ennemi caché est repéré par l'IA (px). */

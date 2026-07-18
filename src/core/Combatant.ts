@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import type { ZarekDef } from './types';
 import { COLORS } from '../config/constants';
-import { POWER_CUBE } from '../config/constants';
+import { POWER_CUBE, REGEN } from '../config/constants';
 
 /**
  * Un combattant : joueur ou NPC. Contient l'ÉTAT de simulation (position, PV,
@@ -35,6 +35,8 @@ export class Combatant {
   kbY = 0;
   /** Vrai si le centre du combattant est dans un buisson (caché). */
   inBush = false;
+  /** Temps écoulé depuis le dernier tir OU dégât subi (ms) — pilote la régén. */
+  sinceCombatMs = 0;
 
   private readonly container: Phaser.GameObjects.Container;
   private readonly body: Phaser.GameObjects.Arc;
@@ -111,6 +113,7 @@ export class Combatant {
   /** Applique des dégâts. Renvoie les dégâts réellement infligés (pour la charge d'ultimate). */
   takeDamage(amount: number): number {
     if (!this.alive) return 0;
+    if (amount > 0) this.sinceCombatMs = 0; // subir des dégâts interrompt la régén
     const before = this.health;
     this.health = Math.max(0, this.health - amount);
     if (this.health <= 0) this.alive = false;
@@ -151,6 +154,18 @@ export class Combatant {
   tickTimers(dtMs: number): void {
     if (this.reloadTimer > 0) this.reloadTimer -= dtMs;
     if (this.slowTimer > 0) this.slowTimer -= dtMs;
+    this.sinceCombatMs += dtMs;
+  }
+
+  /** À appeler quand le combattant tire : ça interrompt la régén. */
+  noteAttack(): void {
+    this.sinceCombatMs = 0;
+  }
+
+  /** Régénère un peu de vie si le combattant est resté hors combat assez longtemps. */
+  regenerate(dtMs: number): void {
+    if (!this.alive || this.sinceCombatMs < REGEN.delayMs || this.health >= this.maxHealth) return;
+    this.health = Math.min(this.maxHealth, this.health + this.maxHealth * REGEN.percentPerSecond * (dtMs / 1000));
   }
 
   /** Met à jour l'affichage à partir de l'état. */

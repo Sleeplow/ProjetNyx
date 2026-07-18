@@ -6,13 +6,14 @@ import type { ZarekDef } from '../core/types';
  * Attaque de base : « Ondes sonores » — une enceinte portable projette des
  * ondes de musique vers la cible, à moyenne portée.
  * Ultimate : « Break Dance » — Zephyr tourne au sol et libère une onde de choc
- * circulaire qui repousse tous les ennemis proches.
+ * circulaire qui REPOUSSE les ennemis proches, pour reprendre ses distances et
+ * les canarder de loin ensuite (synergie tireur).
  */
 export const ZEPHYR: ZarekDef = {
   id: 'zephyr',
   name: 'Zephyr',
   role: 'sharpshooter',
-  description: 'Tireur agile. Projette des ondes sonores à moyenne portée. Ultimate : onde de choc break dance.',
+  description: 'Tireur agile. Projette des ondes sonores à moyenne portée. Ultimate : break dance qui repousse, pour reprendre ses distances et sniper.',
   color: 0x4dd6ff,
   accent: 0xeaffff,
   maxHealth: 900,
@@ -34,7 +35,7 @@ export const ZEPHYR: ZarekDef = {
     label: 'Break Dance',
     damage: 300,
     radius: 210,
-    knockback: 520,
+    knockback: 650,
     slowMs: 0,
     slowFactor: 1,
   },

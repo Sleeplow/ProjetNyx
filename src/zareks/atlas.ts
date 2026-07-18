@@ -7,13 +7,14 @@ import type { ZarekDef } from '../core/types';
  * Attaque de base : « Impact » — une salve de projectiles lourds et larges,
  * puissante mais de courte portée.
  * Ultimate : « Séisme » — Atlas frappe le sol : onde de choc qui inflige de
- * gros dégâts, repousse ET ralentit les ennemis proches.
+ * gros dégâts et RALENTIT fortement les ennemis proches SANS les repousser —
+ * il les garde ainsi collés à sa courte portée pour les marteler (synergie tank).
  */
 export const ATLAS: ZarekDef = {
   id: 'atlas',
   name: 'Atlas',
   role: 'tank',
-  description: 'Tank résistant. Frappe lourde à courte portée. Ultimate : séisme qui repousse et ralentit.',
+  description: 'Tank résistant. Frappe lourde à courte portée. Ultimate : séisme qui ralentit fortement (garde les ennemis à portée).',
   color: 0xff8a3d,
   accent: 0xffd9b3,
   maxHealth: 1800,
@@ -35,9 +36,9 @@ export const ATLAS: ZarekDef = {
     label: 'Séisme',
     damage: 420,
     radius: 260,
-    knockback: 620,
-    slowMs: 2500,
-    slowFactor: 0.45,
+    knockback: 0,
+    slowMs: 3000,
+    slowFactor: 0.4,
   },
   ultChargePerDamage: 0.05,
 };

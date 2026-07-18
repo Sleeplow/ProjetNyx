@@ -37,7 +37,6 @@ export class GameScene extends Phaser.Scene {
   private selectedZarekId = ZAREKS[0].id;
   private camX = 0;
   private camY = 0;
-  private cubeSeed = 24601;
 
   constructor() {
     super('Game');
@@ -53,7 +52,6 @@ export class GameScene extends Phaser.Scene {
     this.handledDead = new Set();
     this.ending = false;
     this.placement = PLAYERS_PER_MATCH;
-    this.cubeSeed = 24601;
 
     const { width, height } = this.map;
     this.cameras.main.setBounds(0, 0, width, height);
@@ -117,8 +115,8 @@ export class GameScene extends Phaser.Scene {
         this.player = new Combatant(this, 'player', getZarek(this.selectedZarekId), true, x, y);
         this.combatants.push(this.player);
       } else {
-        // Les NPC alternent entre les Zareks disponibles (variété).
-        const def = ZAREKS[(i - 1) % ZAREKS.length];
+        // NPC : Zarek tiré au hasard → combinaison différente à chaque manche.
+        const def = ZAREKS[Math.floor(Math.random() * ZAREKS.length)];
         const id = `bot${i}`;
         const bot = new Combatant(this, id, def, false, x, y);
         this.combatants.push(bot);
@@ -127,25 +125,17 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private nextRand(): number {
-    let x = this.cubeSeed;
-    x ^= x << 13;
-    x ^= x >>> 17;
-    x ^= x << 5;
-    this.cubeSeed = x >>> 0;
-    return this.cubeSeed / 0xffffffff;
-  }
-
   private scatterCubes(count: number): void {
-    const { width, height } = this.map;
+    const { width } = this.map;
     const cx = width / 2;
-    const cy = height / 2;
+    const cy = this.map.height / 2;
     let placed = 0;
     let attempts = 0;
     while (placed < count && attempts < count * 30) {
       attempts++;
-      const a = this.nextRand() * TAU;
-      const r = 180 + this.nextRand() * (0.5 * width - 200);
+      // Position au hasard (différente à chaque manche), en évitant les obstacles.
+      const a = Math.random() * TAU;
+      const r = 160 + Math.random() * (0.5 * width - 180);
       const x = cx + Math.cos(a) * r;
       const y = cy + Math.sin(a) * r;
       if (this.isBlocked(x, y)) continue;
@@ -250,7 +240,19 @@ export class GameScene extends Phaser.Scene {
     }
     this.cubes = this.cubes.filter((c) => c.alive);
 
-    // 7bis) Régénération de vie hors combat (n'a pas tiré ni été touché récemment).
+    // 7bis) Cubes restés hors de la zone sûre : ils disparaissent après un délai.
+    for (const cube of this.cubes) {
+      if (this.mode.isOutside(cube.x, cube.y)) cube.tickOutside(dtMs);
+    }
+    this.cubes = this.cubes.filter((cube) => {
+      if (cube.expiredOutside) {
+        cube.destroy();
+        return false;
+      }
+      return true;
+    });
+
+    // 7ter) Régénération de vie hors combat (n'a pas tiré ni été touché récemment).
     for (const c of this.combatants) if (c.alive) c.regenerate(dtMs);
 
     // 8) Morts.
@@ -380,7 +382,14 @@ export class GameScene extends Phaser.Scene {
 
   private handleDeath(c: Combatant): void {
     this.deathBurst(c.x, c.y, c.def.color);
-    this.dropCubes(c.x, c.y, Math.floor(c.cubes / 2) + 1);
+    // Moitié + 1 des cubes lâchée sur place ; le reste réapparaît au hasard
+    // sur la carte (même hors zone) après un court délai.
+    const dropped = Math.floor(c.cubes / 2) + 1;
+    const remaining = Math.max(0, c.cubes - dropped);
+    this.dropCubes(c.x, c.y, dropped);
+    if (remaining > 0) {
+      this.time.delayedCall(POWER_CUBE.respawnDelayMs, () => this.scatterCubes(remaining));
+    }
     if (c.isPlayer) {
       this.placement = this.combatants.filter((o) => o.alive).length + 1;
     } else {

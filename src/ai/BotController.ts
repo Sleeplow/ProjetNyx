@@ -28,25 +28,23 @@ export class BotController {
   private strafeSign = 1;
   private seeded = false;
 
-  /** Petit générateur pseudo-aléatoire par bot (évite Math.random pour rester déterministe/testable). */
-  private seed: number;
-  constructor(id: string) {
-    // Graine dérivée de l'id — stable et sans dépendance à Math.random.
-    let h = 2166136261;
-    for (let i = 0; i < id.length; i++) {
-      h ^= id.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    this.seed = (h >>> 0) || 1;
+  // Personnalité tirée au hasard à la création → chaque bot (et chaque manche)
+  // joue différemment : certains collent l'adversaire, d'autres gardent leurs
+  // distances et fuient plus tôt, et ne convoitent pas les cubes de la même façon.
+  private readonly rangeMult: number; // distance de combat préférée (× portée d'attaque)
+  private readonly fleeRatio: number; // seuil de PV en dessous duquel il fuit
+  private readonly cubeReach: number; // distance max pour se détourner vers un cube
+
+  constructor(_id: string) {
+    const cautious = Math.random() < 0.5;
+    this.rangeMult = cautious ? 0.62 + Math.random() * 0.33 : 0.4 + Math.random() * 0.22;
+    this.fleeRatio = 0.2 + Math.random() * 0.25;
+    this.cubeReach = 220 + Math.random() * 320;
+    if (Math.random() < 0.5) this.strafeSign = -1;
   }
+
   private rand(): number {
-    // xorshift32
-    let x = this.seed;
-    x ^= x << 13;
-    x ^= x >>> 17;
-    x ^= x << 5;
-    this.seed = x >>> 0;
-    return this.seed / 0xffffffff;
+    return Math.random();
   }
 
   update(self: Combatant, world: BotWorld, dtMs: number): InputState {
@@ -86,9 +84,9 @@ export class BotController {
       aimY = toT.y;
 
       const isTank = self.def.role === 'tank';
-      const preferred = self.def.attack.range * (isTank ? 0.5 : 0.72);
+      const preferred = self.def.attack.range * this.rangeMult;
 
-      if (self.healthRatio < AI.fleeHealthRatio && !self.ultReady) {
+      if (self.healthRatio < this.fleeRatio && !self.ultReady) {
         // Fuite : s'éloigner de la cible.
         moveX = -toT.x;
         moveY = -toT.y;
@@ -158,7 +156,7 @@ export class BotController {
 
   private nearestCube(self: Combatant, world: BotWorld): { x: number; y: number } | null {
     let best: { x: number; y: number } | null = null;
-    let bestD = 340; // ne se détourne que pour un cube assez proche
+    let bestD = this.cubeReach; // ne se détourne que pour un cube assez proche
     for (const cube of world.cubes) {
       const d = dist(self.x, self.y, cube.x, cube.y);
       if (d < bestD) {

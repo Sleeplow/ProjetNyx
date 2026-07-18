@@ -6,6 +6,8 @@ export class PowerCube {
   x: number;
   y: number;
   alive = true;
+  /** Temps passé hors de la zone sûre (ms) — au-delà du seuil, le cube disparaît. */
+  outsideMs = 0;
   private readonly sprite: Phaser.GameObjects.Rectangle;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
@@ -27,6 +29,20 @@ export class PowerCube {
       repeat: -1,
       ease: 'Sine.inOut',
     });
+  }
+
+  /** À appeler chaque frame où le cube est hors de la zone sûre. */
+  tickOutside(dtMs: number): void {
+    this.outsideMs += dtMs;
+    // Clignotement d'avertissement dans la dernière seconde avant disparition.
+    const remaining = POWER_CUBE.outsideDespawnMs - this.outsideMs;
+    if (remaining < 1000) {
+      this.sprite.setAlpha(0.25 + 0.6 * Math.abs(Math.sin(this.outsideMs / 70)));
+    }
+  }
+
+  get expiredOutside(): boolean {
+    return this.outsideMs >= POWER_CUBE.outsideDespawnMs;
   }
 
   destroy(): void {

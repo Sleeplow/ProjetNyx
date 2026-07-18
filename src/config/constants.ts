@@ -49,6 +49,10 @@ export const POWER_CUBE = {
   pickupRadius: 26,
   /** Rayon visuel du cube (px). */
   radius: 12,
+  /** Un cube resté hors de la zone sûre disparaît après ce délai (ms). */
+  outsideDespawnMs: 5000,
+  /** Délai avant que les cubes « en trop » d'un combattant mort réapparaissent au hasard (ms). */
+  respawnDelayMs: 5000,
 } as const;
 
 /** Régénération de vie hors combat (comme dans Brawl Stars). */

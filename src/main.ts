@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { COLORS } from './config/constants';
 import { BootScene } from './scenes/BootScene';
 import { MenuScene } from './scenes/MenuScene';
+import { ModeSelectScene } from './scenes/ModeSelectScene';
 import { SelectScene } from './scenes/SelectScene';
 import { GameScene } from './scenes/GameScene';
 import { GameOverScene } from './scenes/GameOverScene';
@@ -21,7 +22,7 @@ const config: Phaser.Types.Core.GameConfig = {
     antialias: true,
     roundPixels: false,
   },
-  scene: [BootScene, MenuScene, SelectScene, GameScene, GameOverScene],
+  scene: [BootScene, MenuScene, ModeSelectScene, SelectScene, GameScene, GameOverScene],
 };
 
 // eslint-disable-next-line no-new

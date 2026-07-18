@@ -250,6 +250,9 @@ export class GameScene extends Phaser.Scene {
     }
     this.cubes = this.cubes.filter((c) => c.alive);
 
+    // 7bis) Régénération de vie hors combat (n'a pas tiré ni été touché récemment).
+    for (const c of this.combatants) if (c.alive) c.regenerate(dtMs);
+
     // 8) Morts.
     for (const c of this.combatants) {
       if (!c.alive && !this.handledDead.has(c.id)) {
@@ -352,6 +355,7 @@ export class GameScene extends Phaser.Scene {
       );
     }
     c.reloadTimer = a.reloadMs;
+    c.noteAttack();
   }
 
   private fireUlt(c: Combatant): void {

@@ -6,6 +6,8 @@ import { ModeSelectScene } from './scenes/ModeSelectScene';
 import { SelectScene } from './scenes/SelectScene';
 import { GameScene } from './scenes/GameScene';
 import { SoccerScene } from './scenes/SoccerScene';
+import { OnlineMenuScene } from './scenes/OnlineMenuScene';
+import { OnlineGameScene } from './scenes/OnlineGameScene';
 import { GameOverScene } from './scenes/GameOverScene';
 
 const config: Phaser.Types.Core.GameConfig = {
@@ -23,7 +25,7 @@ const config: Phaser.Types.Core.GameConfig = {
     antialias: true,
     roundPixels: false,
   },
-  scene: [BootScene, MenuScene, ModeSelectScene, SelectScene, GameScene, SoccerScene, GameOverScene],
+  scene: [BootScene, MenuScene, ModeSelectScene, SelectScene, GameScene, SoccerScene, OnlineMenuScene, OnlineGameScene, GameOverScene],
 };
 
 const game = new Phaser.Game(config);

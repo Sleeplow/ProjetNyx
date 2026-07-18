@@ -21,14 +21,15 @@ export class MenuScene extends Phaser.Scene {
       .text(cx, h * 0.32, 'PROJET NYXT', { fontFamily: 'system-ui, sans-serif', fontSize: '64px', color: '#ffffff', fontStyle: 'bold' })
       .setOrigin(0.5);
     this.add
-      .text(cx, h * 0.32 + 56, 'Battle Royale', {
+      .text(cx, h * 0.32 + 56, 'Battle Royale · Brawl Ball', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '22px',
         color: '#9b8cff',
       })
       .setOrigin(0.5);
 
-    makeButton(this, cx, h * 0.6, 300, 76, 'JOUER', () => this.scene.start('ModeSelect'));
+    makeButton(this, cx, h * 0.56, 300, 72, 'SOLO', () => this.scene.start('ModeSelect'));
+    makeButton(this, cx, h * 0.7, 300, 72, 'EN LIGNE', () => this.scene.start('OnlineMenu'), 0x2f8f5a);
 
     this.add
       .text(cx, h - 40, 'Ordi : ZQSD/WASD + souris + clic · E = ultimate   |   Tablette : joysticks tactiles', {

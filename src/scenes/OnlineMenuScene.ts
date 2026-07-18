@@ -1,0 +1,108 @@
+import Phaser from 'phaser';
+import { makeButton, nightBackground } from '../ui/widgets';
+import { NetClient } from '../net/NetClient';
+import type { Room } from 'colyseus.js';
+
+/**
+ * Lobby en ligne : on entre un pseudo, puis on lance un match rapide, on crée un
+ * salon (dont l'id sert de code à partager) ou on rejoint un ami via son code.
+ * Les saisies sont des champs HTML superposés (clavier natif sur tablette).
+ */
+export class OnlineMenuScene extends Phaser.Scene {
+  private net = new NetClient();
+  private nameInput!: HTMLInputElement;
+  private codeInput!: HTMLInputElement;
+  private status!: Phaser.GameObjects.Text;
+  private busy = false;
+
+  constructor() {
+    super('OnlineMenu');
+  }
+
+  create(): void {
+    nightBackground(this);
+    const w = this.scale.width;
+    const cx = w / 2;
+    const h = this.scale.height;
+
+    this.add.text(cx, 70, 'EN LIGNE', { fontFamily: 'system-ui, sans-serif', fontSize: '44px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+    this.add.text(cx, 116, 'Joue avec tes amis ou au hasard', { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#9b8cff' }).setOrigin(0.5);
+
+    this.add.text(cx, h * 0.24, 'Ton pseudo', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#d8d8ff' }).setOrigin(0.5);
+    this.nameInput = this.makeInput('Pseudo', 16, localStorage.getItem('nyxt.pseudo') ?? '');
+
+    makeButton(this, cx, h * 0.44, 320, 64, 'MATCH RAPIDE', () => this.go(() => this.net.quickMatch(this.playerName())));
+    makeButton(this, cx, h * 0.56, 320, 64, 'CRÉER UN SALON', () => this.go(() => this.net.createRoom(this.playerName())), 0x2f8f5a);
+
+    this.add.text(cx, h * 0.68, 'Code du salon d’un ami', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#d8d8ff' }).setOrigin(0.5);
+    this.codeInput = this.makeInput('Code', 12, '');
+    makeButton(this, cx, h * 0.86, 300, 60, 'REJOINDRE', () => {
+      const code = this.codeInput.value.trim();
+      if (!code) return this.setStatus('Entre un code de salon.', '#ff6b5e');
+      this.go(() => this.net.joinRoom(code, this.playerName()));
+    }, 0x3a3466);
+
+    makeButton(this, 96, 48, 150, 46, '‹ Menu', () => this.scene.start('Menu'), 0x3a3466);
+
+    this.status = this.add.text(cx, h * 0.93, '', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#ffcf33' }).setOrigin(0.5);
+
+    this.layoutInputs();
+    this.scale.on('resize', this.layoutInputs, this);
+    this.events.once('shutdown', () => {
+      this.scale.off('resize', this.layoutInputs, this);
+      this.nameInput.remove();
+      this.codeInput.remove();
+    });
+  }
+
+  private playerName(): string {
+    const n = this.nameInput.value.trim().slice(0, 16) || 'Joueur';
+    localStorage.setItem('nyxt.pseudo', n);
+    return n;
+  }
+
+  /** Lance une connexion, gère l'attente et les erreurs, puis entre en partie. */
+  private async go(connect: () => Promise<Room>): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.setStatus('Connexion…', '#ffcf33');
+    try {
+      const room = await connect();
+      this.setStatus('Connecté !', '#46d160');
+      this.scene.start('OnlineGame', { room });
+    } catch (err) {
+      this.busy = false;
+      const msg = err instanceof Error ? err.message : String(err);
+      this.setStatus(`Échec : ${msg}`, '#ff6b5e');
+    }
+  }
+
+  private setStatus(text: string, color: string): void {
+    this.status.setText(text).setColor(color);
+  }
+
+  private makeInput(placeholder: string, maxLen: number, value: string): HTMLInputElement {
+    const el = document.createElement('input');
+    el.type = 'text';
+    el.placeholder = placeholder;
+    el.maxLength = maxLen;
+    el.value = value;
+    el.autocomplete = 'off';
+    el.style.cssText =
+      'position:fixed;z-index:50;transform:translate(-50%,-50%);' +
+      'width:280px;height:44px;padding:0 14px;border-radius:10px;' +
+      'border:2px solid #6a4dff;background:#1a1636;color:#fff;' +
+      "font:600 18px system-ui,sans-serif;text-align:center;outline:none;box-sizing:border-box;";
+    document.body.appendChild(el);
+    return el;
+  }
+
+  private layoutInputs(): void {
+    const place = (el: HTMLInputElement, yFrac: number) => {
+      el.style.left = `${window.innerWidth / 2}px`;
+      el.style.top = `${window.innerHeight * yFrac}px`;
+    };
+    place(this.nameInput, 0.3);
+    place(this.codeInput, 0.74);
+  }
+}

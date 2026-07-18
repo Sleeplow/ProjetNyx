@@ -1,57 +1,85 @@
-name: Deploy to GitHub Pages
+name: CI / Deploy (prod + QA)
 
-# Build l'app Vite et déploie dist/ sur GitHub Pages.
-# Se déclenche sur la branche par défaut (main) et la branche de travail,
-# ainsi qu'en manuel (bouton "Run workflow" dans l'onglet Actions).
+# Stratégie :
+#   - PR (vers main ou qa) et pushes : job `build` = validation (typecheck + build).
+#   - push sur `main` → déploie la PROD à la RACINE de la branche gh-pages.
+#   - push sur `qa`   → déploie la QA dans le sous-dossier /qa/ de gh-pages.
+# La source de GitHub Pages doit être : "Deploy from a branch" → gh-pages → / (root).
 on:
   push:
-    branches:
-      - main
-      - claude/brawl-stars-web-game-ggi6h2
+    branches: [main, qa]
+  pull_request:
+    branches: [main, qa]
   workflow_dispatch:
 
-# Droits nécessaires au déploiement Pages.
+# Droit d'écriture pour pousser sur la branche gh-pages.
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
-# Un seul déploiement à la fois.
+# Annule les runs redondants d'une même branche.
 concurrency:
-  group: pages
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Validation : tourne sur tout (PR incluses). Un build cassé bloque le déploiement.
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - run: npm ci
+      - run: npm run build
+      - name: Upload build
+        uses: actions/upload-artifact@v4
         with:
+          name: dist
           path: dist
 
-  deploy:
+  # PROD : racine de gh-pages. `clean-exclude` préserve le dossier /qa/.
+  deploy-prod:
     needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Deploy prod to gh-pages root
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: dist
+          clean: true
+          clean-exclude: |
+            qa
+            qa/**
+
+  # QA : sous-dossier /qa/ de gh-pages (le nettoyage reste circonscrit à /qa/).
+  deploy-qa:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/qa'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Deploy QA to gh-pages /qa
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: dist
+          target-folder: qa

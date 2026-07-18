@@ -17,6 +17,20 @@ npm run build    # build de production dans dist/
 npm run preview  # prévisualiser le build
 ```
 
+## Branches & déploiement
+
+| Branche | Rôle | Déploiement |
+|---|---|---|
+| `main` | **Production** (protégée, branche par défaut) | racine du site |
+| `qa` | **Pré-prod / test** | sous-chemin `/qa/` |
+
+Flux : branche de travail → PR vers **`qa`** → test sur `/qa/` → PR `qa` → **`main`** (prod).
+
+Le déploiement se fait sur la branche `gh-pages` via GitHub Actions (prod à la
+racine, qa dans `/qa/`). Les chemins d'assets sont relatifs (`base: './'`), donc
+le même build fonctionne à la racine comme dans `/qa/`. Source GitHub Pages à
+régler sur : *Deploy from a branch → `gh-pages` → `/ (root)`*.
+
 ## Contrôles
 
 | | Déplacement | Viser / Tirer | Ultimate |

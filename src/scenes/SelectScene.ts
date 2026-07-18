@@ -23,7 +23,7 @@ export class SelectScene extends Phaser.Scene {
     this.add.text(cx, 104, 'Mode : Battle Royale — dernier survivant', { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#9b8cff' }).setOrigin(0.5);
 
     // Cartes : les Zareks jouables + des emplacements verrouillés (extension future).
-    const lockedSlots = 3;
+    const lockedSlots = 2;
     const total = ZAREKS.length + lockedSlots;
     const cardW = 150;
     const gap = 18;
@@ -94,5 +94,7 @@ function roleLabel(role: ZarekDef['role']): string {
       return 'Assassin';
     case 'support':
       return 'Soutien';
+    case 'mage':
+      return 'Mage';
   }
 }

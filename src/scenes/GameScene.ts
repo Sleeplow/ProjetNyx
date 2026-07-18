@@ -4,6 +4,7 @@ import { emptyInput } from '../core/types';
 import { Combatant } from '../core/Combatant';
 import { Projectile } from '../core/Projectile';
 import { PowerCube } from '../core/PowerCube';
+import { HazardZone } from '../core/HazardZone';
 import { BattleRoyaleMode } from '../modes/battleRoyale';
 import { BotController, type BotWorld } from '../ai/BotController';
 import { PlayerController } from '../input/PlayerController';
@@ -28,6 +29,7 @@ export class GameScene extends Phaser.Scene {
   private bots = new Map<string, BotController>();
   private projectiles: Projectile[] = [];
   private cubes: PowerCube[] = [];
+  private hazards: HazardZone[] = [];
   private playerController!: PlayerController;
   private hud!: Hud;
 
@@ -48,6 +50,7 @@ export class GameScene extends Phaser.Scene {
     this.combatants = [];
     this.projectiles = [];
     this.cubes = [];
+    this.hazards = [];
     this.bots = new Map();
     this.handledDead = new Set();
     this.ending = false;
@@ -183,6 +186,7 @@ export class GameScene extends Phaser.Scene {
       if (!c.alive) continue;
       const inp = inputs.get(c.id)!;
       c.aimAngle = Math.atan2(inp.aimY, inp.aimX);
+      c.aimDist = Math.hypot(inp.aimX, inp.aimY);
 
       const mv = normalize(inp.moveX, inp.moveY);
       let nx = c.x + mv.x * c.speed * dtSec + c.kbX * dtSec;
@@ -227,6 +231,10 @@ export class GameScene extends Phaser.Scene {
         if (c.alive && this.mode.isOutside(c.x, c.y)) c.takeDamage(dps * dtSec);
       }
     }
+
+    // 6bis) Zones au sol (flaques de potion / auras de poison) + poison persistant.
+    this.updateHazards(dtSec, dtMs);
+    for (const c of this.combatants) if (c.alive) c.tickPoison(dtMs);
 
     // 7) Ramassage de cubes.
     for (const c of this.combatants) {
@@ -307,17 +315,29 @@ export class GameScene extends Phaser.Scene {
   private updateProjectiles(dtSec: number): void {
     for (const p of this.projectiles) {
       if (!p.alive) continue;
-      p.update(dtSec);
+      p.update(dtSec); // peut passer alive=false quand la portée est atteinte
+      const isPotion = p.landsInto !== null;
+
+      let landed = !p.alive; // portée épuisée = atterrissage
       if (p.x < 0 || p.y < 0 || p.x > this.map.width || p.y > this.map.height) {
         p.kill();
-        continue;
-      }
-      for (const ob of this.map.obstacles) {
-        if (circleHitsRect(p.x, p.y, p.radius, ob)) {
-          p.kill();
-          break;
+        landed = true;
+      } else {
+        for (const ob of this.map.obstacles) {
+          if (circleHitsRect(p.x, p.y, p.radius, ob)) {
+            p.kill();
+            landed = true;
+            break;
+          }
         }
       }
+
+      if (isPotion) {
+        // Une potion ne touche personne en vol : elle crée sa flaque en atterrissant.
+        if (landed) this.spawnPotionPuddle(p);
+        continue;
+      }
+
       if (!p.alive) continue;
       for (const c of this.combatants) {
         if (!c.alive || c.id === p.ownerId) continue;
@@ -340,42 +360,130 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /** Zones au sol (flaques de potion / auras de poison) : durée de vie + effets. */
+  private updateHazards(dtSec: number, dtMs: number): void {
+    for (const h of this.hazards) {
+      h.update(dtMs);
+      if (!h.alive) continue;
+      for (const c of this.combatants) {
+        if (!c.alive || c.id === h.ownerId) continue;
+        if (!h.contains(c.x, c.y, c.def.radius)) continue;
+        if (h.dps > 0) {
+          const dealt = c.takeDamage(h.dps * dtSec);
+          if (h.chargesUlt) {
+            const owner = this.combatants.find((o) => o.id === h.ownerId);
+            if (owner && owner.alive) owner.addUltCharge(dealt);
+          }
+        }
+        if (h.slowFactor < 1) c.applySlow(h.slowMs, h.slowFactor);
+        if (h.poisonMs > 0) c.applyPoison(h.poisonMs, h.poisonDps);
+      }
+    }
+    this.hazards = this.hazards.filter((h) => {
+      if (!h.alive) {
+        h.destroy();
+        return false;
+      }
+      return true;
+    });
+  }
+
   // ---------- Actions ----------
 
   private fireAttack(c: Combatant): void {
     const a = c.def.attack;
-    const spread = Phaser.Math.DegToRad(a.spreadDeg);
-    const dmg = a.damage * c.damageMult;
-    const muzzle = c.def.radius + 6;
-    for (let i = 0; i < a.count; i++) {
-      const t = a.count === 1 ? 0 : i / (a.count - 1) - 0.5;
-      const ang = c.aimAngle + t * spread;
-      const dx = Math.cos(ang);
-      const dy = Math.sin(ang);
-      this.projectiles.push(
-        new Projectile(this, c.id, c.x + dx * muzzle, c.y + dy * muzzle, dx * a.speed, dy * a.speed, dmg, a.projRadius, a.range, c.def.color),
-      );
+    if (a.kind === 'potion') {
+      this.throwPotion(c);
+    } else {
+      const spread = Phaser.Math.DegToRad(a.spreadDeg);
+      const dmg = a.damage * c.damageMult;
+      const muzzle = c.def.radius + 6;
+      for (let i = 0; i < a.count; i++) {
+        const t = a.count === 1 ? 0 : i / (a.count - 1) - 0.5;
+        const ang = c.aimAngle + t * spread;
+        const dx = Math.cos(ang);
+        const dy = Math.sin(ang);
+        this.projectiles.push(
+          new Projectile(this, c.id, c.x + dx * muzzle, c.y + dy * muzzle, dx * a.speed, dy * a.speed, dmg, a.projRadius, a.range, c.def.color),
+        );
+      }
     }
     c.reloadTimer = a.reloadMs;
     c.noteAttack();
   }
 
+  /** Lance une potion : elle vole vers la visée puis crée une flaque à l'atterrissage. */
+  private throwPotion(c: Combatant): void {
+    const a = c.def.attack;
+    const dx = Math.cos(c.aimAngle);
+    const dy = Math.sin(c.aimAngle);
+    // Distance de lancer = distance visée (souris / IA), sinon portée max (joystick).
+    const throwDist = c.aimDist > 40 ? clamp(c.aimDist, 90, a.range) : a.range;
+    const muzzle = c.def.radius + 6;
+    const proj = new Projectile(this, c.id, c.x + dx * muzzle, c.y + dy * muzzle, dx * a.speed, dy * a.speed, 0, a.projRadius, throwDist, c.def.color);
+    proj.landsInto = {
+      radius: a.aoeRadius ?? 80,
+      durationMs: a.aoeDurationMs ?? 2500,
+      dps: (a.aoeDps ?? 120) * c.damageMult,
+    };
+    this.projectiles.push(proj);
+  }
+
+  private spawnPotionPuddle(p: Projectile): void {
+    const info = p.landsInto;
+    if (!info) return;
+    this.hazards.push(
+      new HazardZone(this, p.x, p.y, {
+        radius: info.radius,
+        ownerId: p.ownerId,
+        durationMs: info.durationMs,
+        color: COLORS.poison,
+        dps: info.dps,
+        chargesUlt: true,
+      }),
+    );
+  }
+
   private fireUlt(c: Combatant): void {
     const u = c.def.ultimate;
-    const dmg = u.damage * c.damageMult;
-    this.shockwaveFx(c.x, c.y, u.radius, c.def.color);
-    for (const other of this.combatants) {
-      if (other === c || !other.alive) continue;
-      if (dist(c.x, c.y, other.x, other.y) <= u.radius + other.def.radius) {
-        other.takeDamage(dmg);
-        const dir = normalize(other.x - c.x, other.y - c.y);
-        const kx = dir.x === 0 && dir.y === 0 ? 1 : dir.x;
-        const ky = dir.x === 0 && dir.y === 0 ? 0 : dir.y;
-        other.applyKnockback(kx, ky, u.knockback);
-        other.applySlow(u.slowMs, u.slowFactor);
+    if (u.kind === 'aura') {
+      this.spawnPoisonAura(c);
+    } else {
+      const dmg = u.damage * c.damageMult;
+      this.shockwaveFx(c.x, c.y, u.radius, c.def.color);
+      for (const other of this.combatants) {
+        if (other === c || !other.alive) continue;
+        if (dist(c.x, c.y, other.x, other.y) <= u.radius + other.def.radius) {
+          other.takeDamage(dmg);
+          const dir = normalize(other.x - c.x, other.y - c.y);
+          const kx = dir.x === 0 && dir.y === 0 ? 1 : dir.x;
+          const ky = dir.x === 0 && dir.y === 0 ? 0 : dir.y;
+          other.applyKnockback(kx, ky, u.knockback);
+          other.applySlow(u.slowMs, u.slowFactor);
+        }
       }
     }
     c.consumeUlt();
+  }
+
+  /** Dépose une aura de poison persistante à la position du lanceur. */
+  private spawnPoisonAura(c: Combatant): void {
+    const u = c.def.ultimate;
+    this.shockwaveFx(c.x, c.y, u.radius, COLORS.poison);
+    this.hazards.push(
+      new HazardZone(this, c.x, c.y, {
+        radius: u.radius,
+        ownerId: c.id,
+        durationMs: u.auraDurationMs ?? 4000,
+        color: COLORS.poison,
+        dps: 0,
+        slowFactor: u.slowFactor,
+        slowMs: u.slowMs,
+        poisonMs: u.poisonMs ?? 2500,
+        poisonDps: (u.poisonDps ?? 100) * c.damageMult,
+        chargesUlt: false,
+      }),
+    );
   }
 
   // ---------- Mort / fin ----------

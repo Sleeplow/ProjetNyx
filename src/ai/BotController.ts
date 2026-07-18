@@ -80,8 +80,14 @@ export class BotController {
     if (target) {
       const d = dist(self.x, self.y, target.x, target.y);
       const toT = normalize(target.x - self.x, target.y - self.y);
-      aimX = toT.x;
-      aimY = toT.y;
+      if (self.def.attack.kind === 'potion') {
+        // Vecteur NON normalisé → la potion atterrit à la distance de la cible.
+        aimX = target.x - self.x;
+        aimY = target.y - self.y;
+      } else {
+        aimX = toT.x;
+        aimY = toT.y;
+      }
 
       const isTank = self.def.role === 'tank';
       const preferred = self.def.attack.range * this.rangeMult;

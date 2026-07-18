@@ -28,10 +28,10 @@ export function emptyInput(): InputState {
 }
 
 /** Rôle d'un Zarek — sert à l'équilibrage et à l'IA. */
-export type ZarekRole = 'sharpshooter' | 'tank' | 'assassin' | 'support';
+export type ZarekRole = 'sharpshooter' | 'tank' | 'assassin' | 'support' | 'mage';
 
 /** Type d'attaque de base. Extensible : ajouter un `kind` = ajouter un comportement. */
-export type AttackKind = 'projectile';
+export type AttackKind = 'projectile' | 'potion';
 
 /** Définition de l'attaque de base d'un Zarek. */
 export interface AttackDef {
@@ -51,10 +51,16 @@ export interface AttackDef {
   speed: number;
   /** Rayon d'un projectile (px). */
   projRadius: number;
+  /** (kind 'potion') Rayon de la flaque au sol créée à l'atterrissage (px). */
+  aoeRadius?: number;
+  /** (kind 'potion') Durée de vie de la flaque avant dissipation (ms). */
+  aoeDurationMs?: number;
+  /** (kind 'potion') Dégâts par seconde infligés dans la flaque. */
+  aoeDps?: number;
 }
 
 /** Type d'ultimate. Extensible de la même façon que les attaques. */
-export type UltimateKind = 'shockwave';
+export type UltimateKind = 'shockwave' | 'aura';
 
 /** Définition de l'ultimate d'un Zarek. */
 export interface UltimateDef {
@@ -70,6 +76,12 @@ export interface UltimateDef {
   slowMs: number;
   /** Facteur de vitesse pendant le ralentissement (0.5 = 50% de vitesse). */
   slowFactor: number;
+  /** (kind 'aura') Durée de vie de l'aura au sol (ms). */
+  auraDurationMs?: number;
+  /** (kind 'aura') Durée du poison qui persiste après avoir quitté l'aura (ms). */
+  poisonMs?: number;
+  /** (kind 'aura') Dégâts par seconde du poison. */
+  poisonDps?: number;
 }
 
 /** Définition complète d'un Zarek (personnage jouable). Pilotée par les données. */

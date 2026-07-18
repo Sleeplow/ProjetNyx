@@ -15,6 +15,11 @@ export class Projectile {
   /** Distance restante avant expiration (px). */
   distanceLeft: number;
   alive = true;
+  /**
+   * Si défini, ce projectile est une potion : il ne touche personne en vol et
+   * crée une flaque de dégâts à l'atterrissage (portée atteinte ou obstacle).
+   */
+  landsInto: { radius: number; durationMs: number; dps: number } | null = null;
 
   private readonly sprite: Phaser.GameObjects.Arc;
 

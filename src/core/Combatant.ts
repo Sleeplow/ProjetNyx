@@ -18,6 +18,8 @@ export class Combatant {
   x: number;
   y: number;
   aimAngle = 0;
+  /** Distance de visée (longueur du vecteur de visée) — sert au lancer de potion. */
+  aimDist = 0;
 
   health: number;
   cubes = 0;
@@ -37,8 +39,12 @@ export class Combatant {
   inBush = false;
   /** Temps écoulé depuis le dernier tir OU dégât subi (ms) — pilote la régén. */
   sinceCombatMs = 0;
+  /** Poison actif : durée restante (ms) et dégâts/seconde. Persiste hors de l'aura. */
+  poisonMs = 0;
+  poisonDps = 0;
 
   private readonly container: Phaser.GameObjects.Container;
+  private readonly ultGlow: Phaser.GameObjects.Arc;
   private readonly body: Phaser.GameObjects.Arc;
   private readonly barrel: Phaser.GameObjects.Rectangle;
   private readonly hpBack: Phaser.GameObjects.Rectangle;
@@ -56,6 +62,20 @@ export class Combatant {
     this.health = def.maxHealth;
 
     const r = def.radius;
+
+    // Halo « ultime prêt » : anneau qui irradie doucement (pulsation, pas stroboscope),
+    // affiché quand l'ult est chargé. Visible aussi sur les NPC (télégraphe leur ult).
+    this.ultGlow = scene.add.circle(0, 0, r + 8, COLORS.ultReady, 0).setStrokeStyle(4, COLORS.ultReady, 0.9).setVisible(false);
+    scene.tweens.add({
+      targets: this.ultGlow,
+      scale: 1.45,
+      alpha: 0.15,
+      duration: 720,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.inOut',
+    });
+
     this.body = scene.add.circle(0, 0, r, def.color).setStrokeStyle(isPlayer ? 5 : 3, isPlayer ? COLORS.playerAccent : def.accent);
 
     // « Canon » : rectangle qui pointe dans la direction de visée (origine à la base).
@@ -83,6 +103,7 @@ export class Combatant {
       .setOrigin(0.5, 0);
 
     this.container = scene.add.container(x, y, [
+      this.ultGlow,
       this.barrel,
       this.body,
       this.hpBack,
@@ -138,6 +159,20 @@ export class Combatant {
     this.slowFactor = factor;
   }
 
+  applyPoison(ms: number, dps: number): void {
+    if (ms <= 0) return;
+    this.poisonMs = Math.max(this.poisonMs, ms);
+    this.poisonDps = Math.max(this.poisonDps, dps);
+  }
+
+  /** Inflige les dégâts de poison de la frame (le poison perdure hors de l'aura). */
+  tickPoison(dtMs: number): void {
+    if (this.poisonMs <= 0) return;
+    this.takeDamage(this.poisonDps * (dtMs / 1000));
+    this.poisonMs -= dtMs;
+    if (this.poisonMs <= 0) this.poisonDps = 0;
+  }
+
   applyKnockback(dirX: number, dirY: number, force: number): void {
     this.kbX += dirX * force;
     this.kbY += dirY * force;
@@ -177,6 +212,9 @@ export class Combatant {
     this.hpFill.fillColor = this.healthRatio > 0.35 ? COLORS.healthGood : COLORS.healthLow;
 
     this.cubeText.setText(this.cubes > 0 ? `◆${this.cubes}` : '');
+
+    // Halo affiché uniquement quand l'ult est chargé.
+    this.ultGlow.setVisible(this.ultReady && this.alive);
 
     // Rendu « caché dans un buisson » : le joueur reste bien visible, les NPC s'estompent.
     const hidden = this.inBush;

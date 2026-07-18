@@ -12,6 +12,7 @@ export const COLORS = {
   zoneBorder: 0x9b4dff,
   zoneDanger: 0x4a1d7a,
   powerCube: 0x66e0ff,
+  poison: 0x86e05a,
   playerAccent: 0xffe066,
   healthGood: 0x46d160,
   healthLow: 0xe0473a,

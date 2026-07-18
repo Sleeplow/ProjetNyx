@@ -38,6 +38,7 @@ export class GameScene extends Phaser.Scene {
   private ending = false;
   private placement = PLAYERS_PER_MATCH;
   private selectedZarekId = ZAREKS[0].id;
+  private modeId = 'battle-royale';
   private camX = 0;
   private camY = 0;
 
@@ -45,9 +46,10 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
-  create(data: { zarekId?: string }): void {
+  create(data: { zarekId?: string; modeId?: string }): void {
     // Réinitialisation complète (la scène est réutilisée entre les parties).
     this.selectedZarekId = data?.zarekId ?? ZAREKS[0].id;
+    this.modeId = data?.modeId ?? 'battle-royale';
     this.combatants = [];
     this.projectiles = [];
     this.cubes = [];
@@ -573,7 +575,7 @@ export class GameScene extends Phaser.Scene {
     this.ending = true;
     this.hud.flash(victory ? 'VICTOIRE ROYALE !' : 'ÉLIMINÉ', victory ? '#ffcf33' : '#ff6b5e');
     this.time.delayedCall(1500, () => {
-      this.scene.start('GameOver', { victory, placement: this.placement, zarekId: this.selectedZarekId });
+      this.scene.start('GameOver', { victory, mode: 'battle-royale', modeId: this.modeId, placement: this.placement, zarekId: this.selectedZarekId });
     });
   }
 

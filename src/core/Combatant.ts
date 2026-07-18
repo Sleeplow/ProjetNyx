@@ -14,6 +14,8 @@ export class Combatant {
   readonly id: string;
   readonly def: ZarekDef;
   readonly isPlayer: boolean;
+  /** Équipe (modes en équipe comme le foot) ; 0 par défaut. */
+  team = 0;
 
   x: number;
   y: number;
@@ -53,7 +55,15 @@ export class Combatant {
 
   private static readonly BAR_W = 60;
 
-  constructor(scene: Phaser.Scene, id: string, def: ZarekDef, isPlayer: boolean, x: number, y: number) {
+  constructor(
+    scene: Phaser.Scene,
+    id: string,
+    def: ZarekDef,
+    isPlayer: boolean,
+    x: number,
+    y: number,
+    teamColor?: number,
+  ) {
     this.id = id;
     this.def = def;
     this.isPlayer = isPlayer;
@@ -76,7 +86,12 @@ export class Combatant {
       ease: 'Sine.inOut',
     });
 
-    this.body = scene.add.circle(0, 0, r, def.color).setStrokeStyle(isPlayer ? 5 : 3, isPlayer ? COLORS.playerAccent : def.accent);
+    // Le joueur garde son anneau jaune (repère « toi ») ; les NPC peuvent
+    // recevoir une couleur d'équipe (bleu/rouge) pour les modes en équipe —
+    // anneau un peu plus épais alors, pour bien distinguer alliés et ennemis.
+    const strokeColor = isPlayer ? COLORS.playerAccent : teamColor ?? def.accent;
+    const strokeWidth = isPlayer ? 5 : teamColor !== undefined ? 4 : 3;
+    this.body = scene.add.circle(0, 0, r, def.color).setStrokeStyle(strokeWidth, strokeColor);
 
     // « Canon » : rectangle qui pointe dans la direction de visée (origine à la base).
     this.barrel = scene.add.rectangle(0, 0, r + 16, 8, def.accent).setOrigin(0, 0.5);
@@ -231,6 +246,35 @@ export class Combatant {
     } else {
       this.container.setVisible(true).setAlpha(this.inBush ? 0.5 : 1);
     }
+  }
+
+  /** Replace le combattant (engagement de foot) : soigne et purge les altérations. */
+  placeAt(x: number, y: number, fullHeal = true): void {
+    this.x = x;
+    this.y = y;
+    if (fullHeal) this.health = this.maxHealth;
+    this.slowTimer = 0;
+    this.slowFactor = 1;
+    this.poisonMs = 0;
+    this.poisonDps = 0;
+    this.kbX = 0;
+    this.kbY = 0;
+    this.reloadTimer = 0;
+    this.sinceCombatMs = REGEN.delayMs;
+    this.container.setPosition(x, y);
+  }
+
+  /** Masque le combattant (pendant l'attente de réapparition). */
+  hide(): void {
+    this.container.setVisible(false);
+  }
+
+  /** Réapparition après élimination : PV pleins, ult remis à zéro, visible. */
+  revive(x: number, y: number): void {
+    this.alive = true;
+    this.ultCharge = 0;
+    this.placeAt(x, y, true);
+    this.container.setVisible(true).setAlpha(1);
   }
 
   destroy(): void {

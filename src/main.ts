@@ -5,6 +5,7 @@ import { MenuScene } from './scenes/MenuScene';
 import { ModeSelectScene } from './scenes/ModeSelectScene';
 import { SelectScene } from './scenes/SelectScene';
 import { GameScene } from './scenes/GameScene';
+import { SoccerScene } from './scenes/SoccerScene';
 import { GameOverScene } from './scenes/GameOverScene';
 
 const config: Phaser.Types.Core.GameConfig = {
@@ -22,11 +23,16 @@ const config: Phaser.Types.Core.GameConfig = {
     antialias: true,
     roundPixels: false,
   },
-  scene: [BootScene, MenuScene, ModeSelectScene, SelectScene, GameScene, GameOverScene],
+  scene: [BootScene, MenuScene, ModeSelectScene, SelectScene, GameScene, SoccerScene, GameOverScene],
 };
 
-// eslint-disable-next-line no-new
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+
+// En développement uniquement : on expose l'instance pour les tests headless
+// (pilotage des scènes). Jamais exposé dans le build de production.
+if (import.meta.env.DEV) {
+  (window as unknown as { __NYXT__: Phaser.Game }).__NYXT__ = game;
+}
 
 // Service worker (production uniquement) : app installable (PWA) + hors-ligne.
 // Enregistré en relatif → fonctionne à la racine (prod) comme dans /qa/.

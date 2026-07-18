@@ -1,4 +1,4 @@
-# ProjetNyx 🌙
+# Projet Nyxt 🌙
 
 Jeu web type **Brawl Stars**, jouable sur **ordinateur et tablette**. Première
 version : un tableau en **Battle Royale**, **1 joueur contre 4 NPC**, dernier
@@ -31,7 +31,7 @@ npm run preview  # prévisualiser le build
     moyenne portée). Ultimate : *break dance* (onde de choc qui repousse).
   - **Atlas** — tank. Attaque : *impact* (frappe lourde courte portée).
     Ultimate : *séisme* (repousse + ralentit).
-- **1 carte** : Arène Nyx (buissons, obstacles, zone qui rétrécit).
+- **1 carte** : Arène Nyxt (buissons, obstacles, zone qui rétrécit).
 - **1 mode** : Battle Royale (zone qui se referme, buissons pour se cacher,
   cubes de power-up à ramasser, dernier survivant gagne).
 

@@ -39,7 +39,7 @@ export function makeButton(
   };
 }
 
-/** Fond dégradé nocturne + quelques « étoiles » pour l'ambiance Nyx. */
+/** Fond dégradé nocturne + quelques « étoiles » pour l'ambiance Nyxt. */
 export function nightBackground(scene: Phaser.Scene): void {
   const w = scene.scale.width;
   const h = scene.scale.height;

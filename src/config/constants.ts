@@ -1,6 +1,6 @@
 /** Constantes globales de réglage du jeu. Centralisées ici pour équilibrer facilement. */
 
-/** Palette d'ambiance (thème nocturne « Nyx »). */
+/** Palette d'ambiance (thème nocturne « Nyxt »). */
 export const COLORS = {
   background: 0x0b0b1a,
   arenaFloor: 0x181832,

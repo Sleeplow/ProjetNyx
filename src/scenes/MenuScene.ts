@@ -13,12 +13,12 @@ export class MenuScene extends Phaser.Scene {
     const h = this.scale.height;
     const cx = w / 2;
 
-    // Lune stylisée derrière le titre (thème Nyx).
+    // Lune stylisée derrière le titre (thème Nyxt).
     this.add.circle(cx, h * 0.28, 90, 0x2a2350, 0.9).setStrokeStyle(3, 0x6a4dff, 0.6);
     this.add.circle(cx + 34, h * 0.25, 60, 0x0b0b1a, 1);
 
     this.add
-      .text(cx, h * 0.32, 'PROJET NYX', { fontFamily: 'system-ui, sans-serif', fontSize: '64px', color: '#ffffff', fontStyle: 'bold' })
+      .text(cx, h * 0.32, 'PROJET NYXT', { fontFamily: 'system-ui, sans-serif', fontSize: '64px', color: '#ffffff', fontStyle: 'bold' })
       .setOrigin(0.5);
     this.add
       .text(cx, h * 0.32 + 56, 'Battle Royale · 1 joueur contre 4 NPC', {

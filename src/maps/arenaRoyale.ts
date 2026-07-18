@@ -1,7 +1,7 @@
 import type { MapDef } from '../core/types';
 
 /**
- * Arène Nyx — premier tableau (mode Battle Royale).
+ * Arène Nyxt — premier tableau (mode Battle Royale).
  *
  * Terrain carré, symétrique. Des buissons pour se cacher, des obstacles solides
  * pour se couvrir. La zone qui rétrécit (gérée par le mode) se referme vers le
@@ -14,7 +14,7 @@ const SIZE = 1600;
 
 export const ARENA_ROYALE: MapDef = {
   id: 'arena-royale',
-  name: 'Arène Nyx',
+  name: 'Arène Nyxt',
   width: SIZE,
   height: SIZE,
   bushes: [

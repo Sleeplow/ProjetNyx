@@ -38,5 +38,5 @@ export const ZEPHYR: ZarekDef = {
     slowMs: 0,
     slowFactor: 1,
   },
-  ultChargePerDamage: 0.55,
+  ultChargePerDamage: 0.06,
 };

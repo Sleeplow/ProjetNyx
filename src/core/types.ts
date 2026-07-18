@@ -93,7 +93,8 @@ export interface ZarekDef {
   ultimate: UltimateDef;
   /**
    * Charge d'ultimate gagnée par point de dégât infligé (%).
-   * Ex. 0.5 → infliger 200 dégâts remplit la jauge (100%).
+   * Ex. 0.06 → il faut infliger ~1670 dégâts pour remplir la jauge (100%),
+   * soit plusieurs salves qui touchent — pas une seule.
    */
   ultChargePerDamage: number;
 }

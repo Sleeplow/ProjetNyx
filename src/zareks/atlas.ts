@@ -39,5 +39,5 @@ export const ATLAS: ZarekDef = {
     slowMs: 2500,
     slowFactor: 0.45,
   },
-  ultChargePerDamage: 0.5,
+  ultChargePerDamage: 0.05,
 };

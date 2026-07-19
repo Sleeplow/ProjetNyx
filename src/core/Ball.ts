@@ -26,11 +26,22 @@ export class Ball {
   kickerLockMs = 0;
   kickerId: string | null = null;
 
+  private readonly scene: Phaser.Scene;
   private readonly container: Phaser.GameObjects.Container;
+  private readonly shadow: Phaser.GameObjects.Ellipse;
+  private prevX: number;
+  private prevY: number;
+  private spin = 0;
+  private trailAccum = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
+    this.scene = scene;
     this.x = x;
     this.y = y;
+    this.prevX = x;
+    this.prevY = y;
+    // Ombre portée (ne tourne pas avec la balle).
+    this.shadow = scene.add.ellipse(x, y + this.radius * 0.9, this.radius * 2.1, this.radius * 0.9, 0x000000, 0.22).setDepth(13);
     const body = scene.add.circle(0, 0, this.radius, COLORS.white).setStrokeStyle(3, 0x1a1a2e, 1);
     const dot = scene.add.circle(0, 0, this.radius * 0.34, 0x1a1a2e, 0.9);
     const spot1 = scene.add.circle(this.radius * 0.55, -this.radius * 0.35, this.radius * 0.2, 0x1a1a2e, 0.75);
@@ -133,9 +144,26 @@ export class Ball {
 
   syncDisplay(): void {
     this.container.setPosition(this.x, this.y);
+    this.shadow.setPosition(this.x, this.y + this.radius * 0.9);
+    // Rotation « roulement » proportionnelle à la distance parcourue.
+    const dx = this.x - this.prevX;
+    const dy = this.y - this.prevY;
+    const d = Math.hypot(dx, dy);
+    if (d > 0.01) this.spin += (dx >= 0 ? 1 : -1) * (d / this.radius) * 0.6;
+    this.container.setRotation(this.spin);
+    // Traînée : de brefs « fantômes » quand la balle file vite (tir/passe).
+    this.trailAccum += d;
+    if (d > 2.5 && this.trailAccum > 16) {
+      this.trailAccum = 0;
+      const g = this.scene.add.circle(this.x, this.y, this.radius * 0.85, 0xffffff, 0.32).setDepth(13);
+      this.scene.tweens.add({ targets: g, scale: 0.4, alpha: 0, duration: 260, onComplete: () => g.destroy() });
+    }
+    this.prevX = this.x;
+    this.prevY = this.y;
   }
 
   destroy(): void {
     this.container.destroy();
+    this.shadow.destroy();
   }
 }

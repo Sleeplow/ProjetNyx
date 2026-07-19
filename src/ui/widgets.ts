@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
-import { COLORS } from '../config/constants';
 
 export interface Button {
   container: Phaser.GameObjects.Container;
   setPosition(x: number, y: number): void;
+  /** Fixe le facteur de défilement du VISUEL ET de la zone cliquable (doivent rester alignés). */
+  setScrollFactor(value: number): void;
+  destroy(): void;
 }
 
 /** Bouton cliquable réutilisable (fond arrondi + libellé, effet de survol). */
@@ -65,27 +67,44 @@ export function makeButton(
       container.setPosition(nx, ny);
       zone.setPosition(nx, ny);
     },
+    setScrollFactor: (value) => {
+      container.setScrollFactor(value);
+      zone.setScrollFactor(value);
+    },
+    destroy: () => {
+      container.destroy();
+      zone.destroy();
+    },
   };
 }
 
-/** Fond dégradé nocturne + quelques « étoiles » pour l'ambiance Nyxt. */
+/**
+ * Fond nocturne « Nyxt » ANIMÉ, commun à tous les menus (accueil, sélection de
+ * mode / Zarek, en ligne) pour une ambiance cohérente : dégradé violet, étoiles
+ * qui scintillent, halos colorés qui dérivent doucement. Volontairement discret
+ * (faibles opacités) pour ne pas gêner la lecture des options par-dessus.
+ */
 export function nightBackground(scene: Phaser.Scene): void {
   const w = scene.scale.width;
   const h = scene.scale.height;
-  scene.add.rectangle(0, 0, w * 2, h * 2, COLORS.background).setOrigin(0.5).setScrollFactor(0).setDepth(-100).setPosition(w / 2, h / 2);
-  const stars = scene.add.graphics().setScrollFactor(0).setDepth(-99);
-  let seed = 1337;
-  const rand = () => {
-    seed ^= seed << 13;
-    seed ^= seed >>> 17;
-    seed ^= seed << 5;
-    return ((seed >>> 0) % 1000) / 1000;
-  };
-  for (let i = 0; i < 90; i++) {
-    const sx = rand() * w;
-    const sy = rand() * h;
-    const r = rand() * 1.6 + 0.4;
-    stars.fillStyle(0xffffff, rand() * 0.5 + 0.2);
-    stars.fillCircle(sx, sy, r);
+
+  const g = scene.add.graphics().setScrollFactor(0).setDepth(-100);
+  g.fillGradientStyle(0x241a5c, 0x241a5c, 0x080610, 0x080610, 1);
+  g.fillRect(0, 0, w, h);
+
+  for (let i = 0; i < 52; i++) {
+    const star = scene.add
+      .circle(Math.random() * w, Math.random() * h * 0.95, Math.random() * 1.8 + 0.6, 0xffffff, Math.random() * 0.5 + 0.3)
+      .setScrollFactor(0)
+      .setDepth(-95);
+    scene.tweens.add({ targets: star, alpha: 0.08, duration: 900 + Math.random() * 1700, yoyo: true, repeat: -1, delay: Math.random() * 1600, ease: 'Sine.inOut' });
+  }
+
+  const orbColors = [0x6a4dff, 0x2f8f5a, 0x8a5cff];
+  for (let i = 0; i < 3; i++) {
+    const ox = w * (0.22 + 0.28 * i);
+    const oy = h * (0.32 + 0.22 * (i % 2));
+    const orb = scene.add.circle(ox, oy, 150 + i * 40, orbColors[i], 0.09).setScrollFactor(0).setDepth(-92);
+    scene.tweens.add({ targets: orb, x: ox + (Math.random() * 120 - 60), y: oy + (Math.random() * 120 - 60), alpha: 0.15, duration: 4200 + i * 1100, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
   }
 }

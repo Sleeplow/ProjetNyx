@@ -10,6 +10,8 @@ import { BotController, type BotWorld } from '../ai/BotController';
 import { PlayerController } from '../input/PlayerController';
 import { Hud } from '../ui/Hud';
 import { ARENA_ROYALE } from '../maps/arenaRoyale';
+import { resolveChain } from '../shared/game/chain';
+import { drawChainBolt } from '../render/fx';
 import { ZAREKS, getZarek } from '../zareks/registry';
 import { COLORS, POWER_CUBE, PLAYERS_PER_MATCH, BUSH } from '../config/constants';
 import { clamp, dist, normalize, resolveCircleRect, pointInRect, circleHitsRect } from '../core/geometry';
@@ -93,20 +95,32 @@ export class GameScene extends Phaser.Scene {
 
   private drawArena(): void {
     const { width, height } = this.map;
-    this.add.rectangle(width / 2, height / 2, width, height, COLORS.arenaFloor).setDepth(0);
 
-    const grid = this.add.graphics().setDepth(1);
-    grid.lineStyle(1, COLORS.arenaGrid, 0.5);
-    for (let x = 0; x <= width; x += 80) grid.lineBetween(x, 0, x, height);
-    for (let y = 0; y <= height; y += 80) grid.lineBetween(0, y, width, y);
-    grid.lineStyle(6, 0x3a3466, 1);
-    grid.strokeRect(0, 0, width, height);
-
-    for (const b of this.map.bushes) {
-      this.add.rectangle(b.x + b.w / 2, b.y + b.h / 2, b.w, b.h, COLORS.bush, 0.85).setStrokeStyle(3, COLORS.bushEdge, 0.9).setDepth(8);
+    // Sol « damier » cartoon (deux indigos proches → texture douce, plus vive
+    // que l'ancien fond plat).
+    const BASE = 0x2b2760;
+    const TILE = 0x342f76;
+    this.add.rectangle(width / 2, height / 2, width, height, BASE).setDepth(0);
+    const tiles = this.add.graphics().setDepth(0);
+    tiles.fillStyle(TILE, 1);
+    const ts = 120;
+    for (let ty = 0, ry = 0; ty < height; ty += ts, ry++) {
+      for (let tx = 0, rx = 0; tx < width; tx += ts, rx++) {
+        if ((rx + ry) % 2 === 0) tiles.fillRect(tx, ty, ts, ts);
+      }
     }
+    // Bordure épaisse et vive.
+    this.add.rectangle(width / 2, height / 2, width, height).setStrokeStyle(10, 0x7a5cff, 1).setDepth(7);
+
+    // Buissons : vert vif + liseré clair.
+    for (const b of this.map.bushes) {
+      this.add.rectangle(b.x + b.w / 2, b.y + b.h / 2, b.w, b.h, 0x2fae57, 0.9).setStrokeStyle(3, 0x53d97b, 0.9).setDepth(8);
+      this.add.rectangle(b.x + b.w / 2, b.y + Math.min(12, b.h * 0.22), b.w - 8, Math.min(12, b.h * 0.24), 0x5fe08d, 0.9).setDepth(8);
+    }
+    // Obstacles : blocs « pierre » cartoon (face claire + contour épais).
     for (const o of this.map.obstacles) {
-      this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, COLORS.obstacle).setStrokeStyle(3, COLORS.obstacleEdge).setDepth(9);
+      this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, 0x4a4788).setStrokeStyle(4, 0x241f45, 1).setDepth(9);
+      this.add.rectangle(o.x + o.w / 2, o.y + Math.min(12, o.h * 0.25), o.w - 8, Math.min(14, o.h * 0.28), 0x6f69b8).setDepth(9);
     }
   }
 
@@ -418,6 +432,8 @@ export class GameScene extends Phaser.Scene {
     const a = c.def.attack;
     if (a.kind === 'potion') {
       this.throwPotion(c);
+    } else if (a.kind === 'chain') {
+      this.fireChain(c);
     } else {
       const spread = Phaser.Math.DegToRad(a.spreadDeg);
       const dmg = a.damage * c.damageMult;
@@ -434,6 +450,64 @@ export class GameScene extends Phaser.Scene {
     }
     c.reloadTimer = a.reloadMs;
     c.noteAttack();
+  }
+
+  /** Éclair en chaîne : foudroie l'ennemi le plus proche puis rebondit (dégâts décroissants). */
+  private fireChain(c: Combatant): void {
+    const a = c.def.attack;
+    const enemies = this.combatants.filter((o) => o !== c && o.alive);
+    const idx = resolveChain(
+      c.x,
+      c.y,
+      enemies.map((e) => ({ x: e.x, y: e.y, radius: e.def.radius })),
+      a.range,
+      a.chainJumpRange ?? 220,
+      a.chainMaxJumps ?? 2,
+    );
+    let dmg = a.damage * c.damageMult;
+    let px = c.x;
+    let py = c.y;
+    for (const i of idx) {
+      const e = enemies[i];
+      const dealt = e.takeDamage(dmg);
+      c.addUltCharge(dealt);
+      drawChainBolt(this, px, py, e.x, e.y, c.def.color);
+      this.hitSpark(e.x, e.y, c.def.color);
+      px = e.x;
+      py = e.y;
+      dmg *= a.chainFalloff ?? 0.7;
+    }
+  }
+
+  /** Surcharge : un éclair géant arc vers de nombreux ennemis, gros dégâts + les étourdit. */
+  private fireUltChain(c: Combatant): void {
+    const u = c.def.ultimate;
+    const enemies = this.combatants.filter((o) => o !== c && o.alive);
+    const idx = resolveChain(
+      c.x,
+      c.y,
+      enemies.map((e) => ({ x: e.x, y: e.y, radius: e.def.radius })),
+      u.radius,
+      u.chainJumpRange ?? 300,
+      u.chainMaxJumps ?? 5,
+    );
+    const dmg = u.damage * c.damageMult;
+    let px = c.x;
+    let py = c.y;
+    for (const i of idx) {
+      const e = enemies[i];
+      e.takeDamage(dmg);
+      const dir = normalize(e.x - c.x, e.y - c.y);
+      const kx = dir.x === 0 && dir.y === 0 ? 1 : dir.x;
+      const ky = dir.x === 0 && dir.y === 0 ? 0 : dir.y;
+      e.applyKnockback(kx, ky, u.knockback);
+      e.applySlow(u.slowMs, u.slowFactor);
+      drawChainBolt(this, px, py, e.x, e.y, c.def.color, 6);
+      this.hitSpark(e.x, e.y, c.def.color);
+      px = e.x;
+      py = e.y;
+    }
+    this.shockwaveFx(c.x, c.y, 90, c.def.color);
   }
 
   /** Lance une potion : elle vole vers la visée puis crée une flaque à l'atterrissage. */
@@ -494,6 +568,8 @@ export class GameScene extends Phaser.Scene {
     const u = c.def.ultimate;
     if (u.kind === 'aura') {
       this.spawnPoisonAura(c);
+    } else if (u.kind === 'chain') {
+      this.fireUltChain(c);
     } else {
       const dmg = u.damage * c.damageMult;
       this.shockwaveFx(c.x, c.y, u.radius, c.def.color);

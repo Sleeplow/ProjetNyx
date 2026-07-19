@@ -8,6 +8,9 @@ import { SoccerBot, type SoccerWorld } from '../ai/SoccerBot';
 import { PlayerController } from '../input/PlayerController';
 import { SoccerHud } from '../ui/SoccerHud';
 import { PITCH_NYXT } from '../maps/pitchNyxt';
+import { drawCartoonPitch } from '../render/pitchRender';
+import { resolveChain } from '../shared/game/chain';
+import { drawChainBolt } from '../render/fx';
 import { ZAREKS, getZarek } from '../zareks/registry';
 import { COLORS } from '../config/constants';
 import { TEAM, BALL, SOCCER } from '../config/soccer';
@@ -96,43 +99,7 @@ export class SoccerScene extends Phaser.Scene {
   // ---------- Construction ----------
 
   private drawPitch(): void {
-    const { width, height } = this.pitch.map;
-    const cx = width / 2;
-    const cy = height / 2;
-
-    this.add.rectangle(cx, cy, width, height, COLORS.arenaFloor).setDepth(0);
-
-    const grid = this.add.graphics().setDepth(1);
-    grid.lineStyle(1, COLORS.arenaGrid, 0.5);
-    for (let x = 0; x <= width; x += 80) grid.lineBetween(x, 0, x, height);
-    for (let y = 0; y <= height; y += 80) grid.lineBetween(0, y, width, y);
-
-    // Marquages du terrain (ligne médiane + rond central).
-    const lines = this.add.graphics().setDepth(2);
-    lines.lineStyle(4, 0x4a4680, 0.7);
-    lines.lineBetween(cx, 0, cx, height);
-    lines.strokeCircle(cx, cy, 150);
-    lines.fillStyle(0x4a4680, 0.7);
-    lines.fillCircle(cx, cy, 8);
-
-    // Cadres de but, teintés couleur d'équipe (gauche = équipe 0, droite = équipe 1).
-    this.drawGoal(this.pitch.leftGoal.zone.x, this.pitch.leftGoal.zone.y, this.pitch.leftGoal.zone.h, TEAM.colorA);
-    this.drawGoal(this.pitch.rightGoal.zone.x, this.pitch.rightGoal.zone.y, this.pitch.rightGoal.zone.h, TEAM.colorB);
-
-    // Murs pleins + blocs de couverture.
-    for (const w of this.pitch.walls) {
-      this.add.rectangle(w.x + w.w / 2, w.y + w.h / 2, w.w, w.h, COLORS.obstacle).setStrokeStyle(2, COLORS.obstacleEdge).setDepth(9);
-    }
-    for (const o of this.pitch.map.obstacles) {
-      if (this.pitch.walls.includes(o)) continue;
-      this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, COLORS.obstacle).setStrokeStyle(3, COLORS.obstacleEdge).setDepth(9);
-    }
-  }
-
-  private drawGoal(x: number, y: number, h: number, color: number): void {
-    const w = this.pitch.leftGoal.zone.w;
-    this.add.rectangle(x + w / 2, y + h / 2, w, h, color, 0.22).setDepth(2);
-    this.add.rectangle(x + w / 2, y + h / 2, w, h).setStrokeStyle(5, color, 0.9).setDepth(3);
+    drawCartoonPitch(this, this.pitch);
   }
 
   private spawnTeams(): void {
@@ -455,10 +422,13 @@ export class SoccerScene extends Phaser.Scene {
     const a = c.def.attack;
     if (a.kind === 'potion') {
       this.throwPotion(c);
+    } else if (a.kind === 'chain') {
+      this.fireChain(c);
     } else {
       const spread = Phaser.Math.DegToRad(a.spreadDeg);
       const dmg = a.damage * c.damageMult;
       const muzzle = c.def.radius + 6;
+      this.muzzleFlash(c.x + Math.cos(c.aimAngle) * muzzle, c.y + Math.sin(c.aimAngle) * muzzle, c.def.color);
       for (let i = 0; i < a.count; i++) {
         const t = a.count === 1 ? 0 : i / (a.count - 1) - 0.5;
         const ang = c.aimAngle + t * spread;
@@ -471,6 +441,64 @@ export class SoccerScene extends Phaser.Scene {
     }
     c.reloadTimer = a.reloadMs;
     c.noteAttack();
+  }
+
+  /** Éclair en chaîne : foudroie l'ennemi (autre équipe) le plus proche puis rebondit. */
+  private fireChain(c: Combatant): void {
+    const a = c.def.attack;
+    const enemies = this.combatants.filter((o) => o.alive && o.team !== c.team);
+    const idx = resolveChain(
+      c.x,
+      c.y,
+      enemies.map((e) => ({ x: e.x, y: e.y, radius: e.def.radius })),
+      a.range,
+      a.chainJumpRange ?? 220,
+      a.chainMaxJumps ?? 2,
+    );
+    let dmg = a.damage * c.damageMult;
+    let px = c.x;
+    let py = c.y;
+    for (const i of idx) {
+      const e = enemies[i];
+      const dealt = e.takeDamage(dmg);
+      c.addUltCharge(dealt);
+      drawChainBolt(this, px, py, e.x, e.y, c.def.color);
+      this.hitSpark(e.x, e.y, c.def.color);
+      px = e.x;
+      py = e.y;
+      dmg *= a.chainFalloff ?? 0.7;
+    }
+  }
+
+  /** Surcharge : un éclair géant arc vers de nombreux ennemis, gros dégâts + les étourdit. */
+  private fireUltChain(c: Combatant): void {
+    const u = c.def.ultimate;
+    const enemies = this.combatants.filter((o) => o.alive && o.team !== c.team);
+    const idx = resolveChain(
+      c.x,
+      c.y,
+      enemies.map((e) => ({ x: e.x, y: e.y, radius: e.def.radius })),
+      u.radius,
+      u.chainJumpRange ?? 300,
+      u.chainMaxJumps ?? 5,
+    );
+    const dmg = u.damage * c.damageMult;
+    let px = c.x;
+    let py = c.y;
+    for (const i of idx) {
+      const e = enemies[i];
+      e.takeDamage(dmg);
+      const dir = normalize(e.x - c.x, e.y - c.y);
+      const kx = dir.x === 0 && dir.y === 0 ? 1 : dir.x;
+      const ky = dir.x === 0 && dir.y === 0 ? 0 : dir.y;
+      e.applyKnockback(kx, ky, u.knockback);
+      e.applySlow(u.slowMs, u.slowFactor);
+      drawChainBolt(this, px, py, e.x, e.y, c.def.color, 6);
+      this.hitSpark(e.x, e.y, c.def.color);
+      px = e.x;
+      py = e.y;
+    }
+    this.shockwaveFx(c.x, c.y, 90, c.def.color);
   }
 
   private throwPotion(c: Combatant): void {
@@ -612,6 +640,8 @@ export class SoccerScene extends Phaser.Scene {
           chargesUlt: false,
         }),
       );
+    } else if (u.kind === 'chain') {
+      this.fireUltChain(c);
     } else {
       const dmg = u.damage * c.damageMult;
       this.shockwaveFx(c.x, c.y, u.radius, c.def.color);
@@ -669,6 +699,26 @@ export class SoccerScene extends Phaser.Scene {
       const ring = this.add.circle(x, y, 40, color, 0.15).setStrokeStyle(6, color, 0.9).setDepth(26).setScale(0.2);
       this.tweens.add({ targets: ring, scale: 2 + i * 0.6, alpha: 0, duration: 520 + i * 120, ease: 'Cubic.out', onComplete: () => ring.destroy() });
     }
+    // Confettis qui giclent.
+    const palette = [color, COLORS.white, COLORS.ultReady, COLORS.healthGood];
+    for (let i = 0; i < 26; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 90 + Math.random() * 230;
+      const c = this.add.rectangle(x, y, 8, 12, palette[i % palette.length]).setDepth(27).setAngle(Math.random() * 360);
+      this.tweens.add({
+        targets: c,
+        x: x + Math.cos(ang) * spd,
+        y: y + Math.sin(ang) * spd + 70,
+        angle: c.angle + 360,
+        alpha: 0,
+        duration: 700 + Math.random() * 320,
+        ease: 'Quad.out',
+        onComplete: () => c.destroy(),
+      });
+    }
+    // Bref flash d'écran (sous le HUD).
+    const flash = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, COLORS.white, 0.32).setScrollFactor(0).setDepth(900);
+    this.tweens.add({ targets: flash, alpha: 0, duration: 260, onComplete: () => flash.destroy() });
   }
 
   private shockwaveFx(x: number, y: number, radius: number, color: number): void {
@@ -677,9 +727,33 @@ export class SoccerScene extends Phaser.Scene {
     this.tweens.add({ targets: ring, alpha: 0, duration: 440, ease: 'Quad.in', onComplete: () => ring.destroy() });
   }
 
+  /** Éclair de départ d'un tir (au bout du « canon »). */
+  private muzzleFlash(x: number, y: number, color: number): void {
+    const flash = this.add.circle(x, y, 13, COLORS.white, 0.9).setDepth(22).setScale(0.6);
+    this.tweens.add({ targets: flash, scale: 1.5, alpha: 0, duration: 120, ease: 'Quad.out', onComplete: () => flash.destroy() });
+    const tint = this.add.circle(x, y, 9, color, 0.85).setDepth(22);
+    this.tweens.add({ targets: tint, scale: 1.9, alpha: 0, duration: 170, ease: 'Cubic.out', onComplete: () => tint.destroy() });
+  }
+
+  /** Gerbe d'impact : un « pop » central + quelques éclats qui giclent. */
   private hitSpark(x: number, y: number, color: number): void {
-    const s = this.add.circle(x, y, 9, color, 0.9).setDepth(24);
-    this.tweens.add({ targets: s, scale: 2, alpha: 0, duration: 180, onComplete: () => s.destroy() });
+    const pop = this.add.circle(x, y, 10, COLORS.white, 0.95).setDepth(24);
+    this.tweens.add({ targets: pop, scale: 2.2, alpha: 0, duration: 160, ease: 'Quad.out', onComplete: () => pop.destroy() });
+    for (let i = 0; i < 6; i++) {
+      const ang = (i / 6) * Math.PI * 2 + Math.random() * 0.6;
+      const d = 18 + Math.random() * 12;
+      const shard = this.add.circle(x, y, 4, color, 1).setDepth(24);
+      this.tweens.add({
+        targets: shard,
+        x: x + Math.cos(ang) * d,
+        y: y + Math.sin(ang) * d,
+        scale: 0.2,
+        alpha: 0,
+        duration: 220,
+        ease: 'Cubic.out',
+        onComplete: () => shard.destroy(),
+      });
+    }
   }
 
   private deathBurst(x: number, y: number, color: number): void {

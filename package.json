@@ -1,13 +1,16 @@
 {
   "name": "projetnyxt",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "Projet Nyxt — jeu web type Brawl Stars (Battle Royale). Extensible : Zareks, cartes et modes pilotés par des données.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "server": "tsx watch server/index.ts",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --format=cjs --target=node18 --external:bufferutil --external:utf-8-validate --outfile=server/nyxt-server.cjs",
+    "start:server": "node server/nyxt-server.cjs"
   },
   "keywords": [
     "game",
@@ -17,7 +20,11 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "phaser": "^3.87.0"
+    "@colyseus/ws-transport": "^0.16.5",
+    "colyseus": "^0.16.5",
+    "colyseus.js": "^0.16.22",
+    "phaser": "^3.87.0",
+    "tsx": "^4.23.1"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

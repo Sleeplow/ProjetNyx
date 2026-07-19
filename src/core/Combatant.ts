@@ -1,11 +1,12 @@
 import Phaser from 'phaser';
 import type { ZarekDef } from './types';
-import { COLORS } from '../config/constants';
 import { POWER_CUBE, REGEN } from '../config/constants';
+import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 
 /**
  * Un combattant : joueur ou NPC. Contient l'ÉTAT de simulation (position, PV,
- * charge d'ultimate…) et son rendu Phaser (corps, canon, barre de vie, nom).
+ * charge d'ultimate…) ; le rendu « cartoon » est délégué à `AvatarVisual`
+ * (partagé avec l'en ligne).
  *
  * L'état est volontairement séparé des périphériques d'entrée : un combattant
  * est mis à jour via un `InputState` fourni de l'extérieur (voir types.ts).
@@ -45,15 +46,9 @@ export class Combatant {
   poisonMs = 0;
   poisonDps = 0;
 
-  private readonly container: Phaser.GameObjects.Container;
-  private readonly ultGlow: Phaser.GameObjects.Arc;
-  private readonly body: Phaser.GameObjects.Arc;
-  private readonly barrel: Phaser.GameObjects.Rectangle;
-  private readonly hpBack: Phaser.GameObjects.Rectangle;
-  private readonly hpFill: Phaser.GameObjects.Rectangle;
-  private readonly cubeText: Phaser.GameObjects.Text;
-
-  private static readonly BAR_W = 60;
+  private readonly vis: AvatarVisual;
+  /** Suivi de la vie pour déclencher un flash « touché ». */
+  private lastHealth: number;
 
   constructor(
     scene: Phaser.Scene,
@@ -70,64 +65,11 @@ export class Combatant {
     this.x = x;
     this.y = y;
     this.health = def.maxHealth;
+    this.lastHealth = this.health;
 
-    const r = def.radius;
-
-    // Halo « ultime prêt » : anneau qui irradie doucement (pulsation, pas stroboscope),
-    // affiché quand l'ult est chargé. Visible aussi sur les NPC (télégraphe leur ult).
-    this.ultGlow = scene.add.circle(0, 0, r + 8, COLORS.ultReady, 0).setStrokeStyle(4, COLORS.ultReady, 0.9).setVisible(false);
-    scene.tweens.add({
-      targets: this.ultGlow,
-      scale: 1.45,
-      alpha: 0.15,
-      duration: 720,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.inOut',
-    });
-
-    // Le joueur garde son anneau jaune (repère « toi ») ; les NPC peuvent
-    // recevoir une couleur d'équipe (bleu/rouge) pour les modes en équipe —
-    // anneau un peu plus épais alors, pour bien distinguer alliés et ennemis.
-    const strokeColor = isPlayer ? COLORS.playerAccent : teamColor ?? def.accent;
-    const strokeWidth = isPlayer ? 5 : teamColor !== undefined ? 4 : 3;
-    this.body = scene.add.circle(0, 0, r, def.color).setStrokeStyle(strokeWidth, strokeColor);
-
-    // « Canon » : rectangle qui pointe dans la direction de visée (origine à la base).
-    this.barrel = scene.add.rectangle(0, 0, r + 16, 8, def.accent).setOrigin(0, 0.5);
-
-    this.hpBack = scene.add
-      .rectangle(-Combatant.BAR_W / 2, -(r + 20), Combatant.BAR_W, 8, COLORS.healthBack)
-      .setOrigin(0, 0.5)
-      .setStrokeStyle(1, 0x000000, 0.6);
-    this.hpFill = scene.add
-      .rectangle(-Combatant.BAR_W / 2, -(r + 20), Combatant.BAR_W, 8, COLORS.healthGood)
-      .setOrigin(0, 0.5);
-
-    this.cubeText = scene.add
-      .text(0, -(r + 34), '', { fontFamily: 'system-ui, sans-serif', fontSize: '14px', color: '#66e0ff', fontStyle: 'bold' })
-      .setOrigin(0.5, 1);
-
-    const label = scene.add
-      .text(0, r + 6, isPlayer ? 'TOI' : def.name, {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: isPlayer ? '15px' : '12px',
-        color: isPlayer ? '#ffe066' : '#cfcfe6',
-        fontStyle: isPlayer ? 'bold' : 'normal',
-      })
-      .setOrigin(0.5, 0);
-
-    this.container = scene.add.container(x, y, [
-      this.ultGlow,
-      this.barrel,
-      this.body,
-      this.hpBack,
-      this.hpFill,
-      this.cubeText,
-      label,
-    ]);
-    // Le joueur est rendu au-dessus des NPC.
-    this.container.setDepth(isPlayer ? 20 : 15);
+    this.vis = createAvatarVisual(scene, def, { isSelf: isPlayer, teamColor, label: isPlayer ? 'TOI' : def.name });
+    this.vis.container.setPosition(x, y).setDepth(isPlayer ? 20 : 15);
+    this.vis.popIn();
   }
 
   get maxHealth(): number {
@@ -227,24 +169,26 @@ export class Combatant {
    * visible du point de vue du joueur (calculé par la scène).
    */
   syncDisplay(revealedToPlayer: boolean): void {
-    this.container.setPosition(this.x, this.y);
-    this.barrel.setRotation(this.aimAngle);
+    this.vis.container.setPosition(this.x, this.y);
+    this.vis.setAim(this.aimAngle);
 
-    this.hpFill.width = Combatant.BAR_W * this.healthRatio;
-    this.hpFill.fillColor = this.healthRatio > 0.35 ? COLORS.healthGood : COLORS.healthLow;
+    // Flash « touché » (déclenché dès que la vie baisse).
+    if (this.health < this.lastHealth) this.vis.flashHit();
+    this.lastHealth = this.health;
 
-    this.cubeText.setText(this.cubes > 0 ? `◆${this.cubes}` : '');
-    this.ultGlow.setVisible(this.ultReady && this.alive);
+    this.vis.setHealth(this.healthRatio);
+    this.vis.setCubes(this.cubes);
+    this.vis.setUltReady(this.ultReady && this.alive);
 
     // Furtivité symétrique : un ennemi dans un buisson est INVISIBLE pour le
     // joueur tant qu'il n'est pas révélé (de près) — comme le joueur l'est pour
     // les bots. Le joueur se voit toujours, juste estompé quand il est caché.
     if (this.isPlayer) {
-      this.container.setVisible(true).setAlpha(this.inBush ? 0.55 : 1);
+      this.vis.container.setVisible(true).setAlpha(this.inBush ? 0.55 : 1);
     } else if (this.inBush && !revealedToPlayer) {
-      this.container.setVisible(false);
+      this.vis.container.setVisible(false);
     } else {
-      this.container.setVisible(true).setAlpha(this.inBush ? 0.5 : 1);
+      this.vis.container.setVisible(true).setAlpha(this.inBush ? 0.5 : 1);
     }
   }
 
@@ -261,12 +205,14 @@ export class Combatant {
     this.kbY = 0;
     this.reloadTimer = 0;
     this.sinceCombatMs = REGEN.delayMs;
-    this.container.setPosition(x, y);
+    this.lastHealth = this.health;
+    this.vis.reset();
+    this.vis.container.setPosition(x, y);
   }
 
   /** Masque le combattant (pendant l'attente de réapparition). */
   hide(): void {
-    this.container.setVisible(false);
+    this.vis.container.setVisible(false);
   }
 
   /** Réapparition après élimination : PV pleins, ult remis à zéro, visible. */
@@ -274,10 +220,11 @@ export class Combatant {
     this.alive = true;
     this.ultCharge = 0;
     this.placeAt(x, y, true);
-    this.container.setVisible(true).setAlpha(1);
+    this.vis.container.setVisible(true).setAlpha(1);
+    this.vis.popIn();
   }
 
   destroy(): void {
-    this.container.destroy();
+    this.vis.destroy();
   }
 }

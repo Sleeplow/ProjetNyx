@@ -5,7 +5,8 @@ import { POWER_CUBE, REGEN } from '../config/constants';
 
 /**
  * Un combattant : joueur ou NPC. Contient l'ÉTAT de simulation (position, PV,
- * charge d'ultimate…) et son rendu Phaser (corps, canon, barre de vie, nom).
+ * charge d'ultimate…) et son rendu Phaser (corps « cartoon », yeux, barre de
+ * vie, nom).
  *
  * L'état est volontairement séparé des périphériques d'entrée : un combattant
  * est mis à jour via un `InputState` fourni de l'extérieur (voir types.ts).
@@ -45,15 +46,28 @@ export class Combatant {
   poisonMs = 0;
   poisonDps = 0;
 
+  private readonly scene: Phaser.Scene;
   private readonly container: Phaser.GameObjects.Container;
+  private readonly shadow: Phaser.GameObjects.Ellipse;
   private readonly ultGlow: Phaser.GameObjects.Arc;
   private readonly body: Phaser.GameObjects.Arc;
   private readonly barrel: Phaser.GameObjects.Rectangle;
+  private readonly highlight: Phaser.GameObjects.Arc;
+  private readonly eyeL: Phaser.GameObjects.Arc;
+  private readonly eyeR: Phaser.GameObjects.Arc;
+  private readonly pupilL: Phaser.GameObjects.Arc;
+  private readonly pupilR: Phaser.GameObjects.Arc;
   private readonly hpBack: Phaser.GameObjects.Rectangle;
   private readonly hpFill: Phaser.GameObjects.Rectangle;
   private readonly cubeText: Phaser.GameObjects.Text;
 
+  /** Suivi de la vie pour déclencher un flash « touché ». */
+  private lastHealth: number;
+  /** Compte à rebours (en frames) du flash blanc de dégât. */
+  private flashTimer = 0;
+
   private static readonly BAR_W = 60;
+  private static readonly EYE_DARK = 0x14102a;
 
   constructor(
     scene: Phaser.Scene,
@@ -70,11 +84,16 @@ export class Combatant {
     this.x = x;
     this.y = y;
     this.health = def.maxHealth;
+    this.lastHealth = this.health;
 
+    this.scene = scene;
     const r = def.radius;
 
-    // Halo « ultime prêt » : anneau qui irradie doucement (pulsation, pas stroboscope),
-    // affiché quand l'ult est chargé. Visible aussi sur les NPC (télégraphe leur ult).
+    // Ombre portée douce : donne du volume et « décolle » le perso du sol.
+    this.shadow = scene.add.ellipse(0, r * 0.82, r * 1.95, r * 0.82, 0x000000, 0.22);
+
+    // Halo « ultime prêt » : anneau qui irradie doucement (pulsation, pas
+    // stroboscope), affiché quand l'ult est chargé. Visible aussi sur les NPC.
     this.ultGlow = scene.add.circle(0, 0, r + 8, COLORS.ultReady, 0).setStrokeStyle(4, COLORS.ultReady, 0.9).setVisible(false);
     scene.tweens.add({
       targets: this.ultGlow,
@@ -86,26 +105,35 @@ export class Combatant {
       ease: 'Sine.inOut',
     });
 
-    // Le joueur garde son anneau jaune (repère « toi ») ; les NPC peuvent
-    // recevoir une couleur d'équipe (bleu/rouge) pour les modes en équipe —
-    // anneau un peu plus épais alors, pour bien distinguer alliés et ennemis.
+    // « Canon » : petit indicateur qui pointe dans la direction de visée
+    // (derrière le corps, comme une arme qui dépasse).
+    this.barrel = scene.add.rectangle(0, 0, r + 14, 7, def.accent).setOrigin(0, 0.5);
+
+    // Corps : contour ÉPAIS (look cartoon). Anneau jaune pour le joueur, couleur
+    // d'équipe (bleu/rouge) pour les bots en mode équipe — anneau plus épais alors.
     const strokeColor = isPlayer ? COLORS.playerAccent : teamColor ?? def.accent;
-    const strokeWidth = isPlayer ? 5 : teamColor !== undefined ? 4 : 3;
+    const strokeWidth = isPlayer ? 7 : teamColor !== undefined ? 6 : 5;
     this.body = scene.add.circle(0, 0, r, def.color).setStrokeStyle(strokeWidth, strokeColor);
 
-    // « Canon » : rectangle qui pointe dans la direction de visée (origine à la base).
-    this.barrel = scene.add.rectangle(0, 0, r + 16, 8, def.accent).setOrigin(0, 0.5);
+    // Reflet brillant en haut à gauche (effet « lustré »).
+    this.highlight = scene.add.circle(-r * 0.3, -r * 0.36, r * 0.4, COLORS.white, 0.2);
+
+    // Yeux : le perso « regarde » là où il vise. Très lisible et sympathique.
+    this.eyeL = scene.add.circle(0, 0, r * 0.28, COLORS.white, 1).setStrokeStyle(2, Combatant.EYE_DARK, 0.5);
+    this.eyeR = scene.add.circle(0, 0, r * 0.28, COLORS.white, 1).setStrokeStyle(2, Combatant.EYE_DARK, 0.5);
+    this.pupilL = scene.add.circle(0, 0, r * 0.14, Combatant.EYE_DARK, 1);
+    this.pupilR = scene.add.circle(0, 0, r * 0.14, Combatant.EYE_DARK, 1);
 
     this.hpBack = scene.add
-      .rectangle(-Combatant.BAR_W / 2, -(r + 20), Combatant.BAR_W, 8, COLORS.healthBack)
+      .rectangle(-Combatant.BAR_W / 2, -(r + 22), Combatant.BAR_W, 9, COLORS.healthBack)
       .setOrigin(0, 0.5)
-      .setStrokeStyle(1, 0x000000, 0.6);
+      .setStrokeStyle(2, 0x000000, 0.7);
     this.hpFill = scene.add
-      .rectangle(-Combatant.BAR_W / 2, -(r + 20), Combatant.BAR_W, 8, COLORS.healthGood)
+      .rectangle(-Combatant.BAR_W / 2, -(r + 22), Combatant.BAR_W, 9, COLORS.healthGood)
       .setOrigin(0, 0.5);
 
     this.cubeText = scene.add
-      .text(0, -(r + 34), '', { fontFamily: 'system-ui, sans-serif', fontSize: '14px', color: '#66e0ff', fontStyle: 'bold' })
+      .text(0, -(r + 36), '', { fontFamily: 'system-ui, sans-serif', fontSize: '14px', color: '#66e0ff', fontStyle: 'bold' })
       .setOrigin(0.5, 1);
 
     const label = scene.add
@@ -118,9 +146,15 @@ export class Combatant {
       .setOrigin(0.5, 0);
 
     this.container = scene.add.container(x, y, [
+      this.shadow,
       this.ultGlow,
       this.barrel,
       this.body,
+      this.highlight,
+      this.eyeL,
+      this.eyeR,
+      this.pupilL,
+      this.pupilR,
       this.hpBack,
       this.hpFill,
       this.cubeText,
@@ -222,6 +256,15 @@ export class Combatant {
     this.health = Math.min(this.maxHealth, this.health + this.maxHealth * REGEN.percentPerSecond * (dtMs / 1000));
   }
 
+  /** Flash blanc + petit écrasement quand le combattant encaisse un coup. */
+  private triggerHitFlash(): void {
+    this.body.setFillStyle(COLORS.white);
+    this.flashTimer = 6;
+    this.scene.tweens.killTweensOf(this.container);
+    this.container.setScale(1);
+    this.scene.tweens.add({ targets: this.container, scaleX: 1.16, scaleY: 0.84, duration: 80, yoyo: true, ease: 'Quad.out' });
+  }
+
   /**
    * Met à jour l'affichage. `revealedToPlayer` indique si ce combattant est
    * visible du point de vue du joueur (calculé par la scène).
@@ -229,6 +272,31 @@ export class Combatant {
   syncDisplay(revealedToPlayer: boolean): void {
     this.container.setPosition(this.x, this.y);
     this.barrel.setRotation(this.aimAngle);
+
+    // Yeux orientés vers la visée (le perso regarde là où il vise).
+    const r = this.def.radius;
+    const ax = Math.cos(this.aimAngle);
+    const ay = Math.sin(this.aimAngle);
+    const px = -ay;
+    const py = ax;
+    const fwd = r * 0.26;
+    const spread = r * 0.4;
+    const lx = ax * fwd + px * spread;
+    const ly = ay * fwd + py * spread;
+    const rx = ax * fwd - px * spread;
+    const ry = ay * fwd - py * spread;
+    this.eyeL.setPosition(lx, ly);
+    this.eyeR.setPosition(rx, ry);
+    this.pupilL.setPosition(lx + ax * r * 0.12, ly + ay * r * 0.12);
+    this.pupilR.setPosition(rx + ax * r * 0.12, ry + ay * r * 0.12);
+
+    // Flash « touché » (déclenché dès que la vie baisse).
+    if (this.health < this.lastHealth) this.triggerHitFlash();
+    this.lastHealth = this.health;
+    if (this.flashTimer > 0) {
+      this.flashTimer -= 1;
+      if (this.flashTimer === 0) this.body.setFillStyle(this.def.color);
+    }
 
     this.hpFill.width = Combatant.BAR_W * this.healthRatio;
     this.hpFill.fillColor = this.healthRatio > 0.35 ? COLORS.healthGood : COLORS.healthLow;
@@ -261,6 +329,11 @@ export class Combatant {
     this.kbY = 0;
     this.reloadTimer = 0;
     this.sinceCombatMs = REGEN.delayMs;
+    this.lastHealth = this.health;
+    this.flashTimer = 0;
+    this.body.setFillStyle(this.def.color);
+    this.scene.tweens.killTweensOf(this.container);
+    this.container.setScale(1);
     this.container.setPosition(x, y);
   }
 

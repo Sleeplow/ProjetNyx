@@ -925,10 +925,16 @@ export class GameScene extends Phaser.Scene {
       }
       return;
     }
-    // Joueur éliminé : on passe en mode spectateur et la partie continue jusqu'à
-    // ce qu'il ne reste qu'un survivant (ou que le joueur quitte lui-même).
+    // Joueur éliminé.
+    if (alive.length <= 1) {
+      // Un seul survivant (ou aucun) : la partie est finie — surtout PAS de
+      // mode spectateur (sinon on crée puis détruit la bannière dans la même
+      // frame, et l'update suivante ferait un setText sur un objet détruit).
+      this.endGame(false);
+      return;
+    }
+    // Sinon on suit un survivant jusqu'au dénouement (ou jusqu'à ce qu'on quitte).
     if (!this.spectating) this.enterSpectate(alive.length);
-    if (alive.length <= 1) this.endGame(false);
   }
 
   /** Entre en mode spectateur après élimination : suit un survivant, boutons pour changer/quitter. */
@@ -967,9 +973,14 @@ export class GameScene extends Phaser.Scene {
   private endGame(victory: boolean): void {
     if (this.ending) return;
     this.ending = true;
+    // Coupe le suivi spectateur AVANT de détruire ses objets : sinon le bloc
+    // caméra de l'update suivante ferait un setText sur une bannière détruite
+    // (→ crash « drawImage of null », écran figé).
+    this.spectating = false;
     for (const b of this.spectateButtons) b.destroy();
     this.spectateButtons = [];
     this.spectateBanner?.destroy();
+    this.spectateBanner = undefined;
     this.hud.flash(victory ? 'VICTOIRE ROYALE !' : 'FIN DE LA PARTIE', victory ? '#ffcf33' : '#d8d8ff');
     this.time.delayedCall(1500, () => {
       this.scene.start('GameOver', { victory, mode: 'battle-royale', modeId: this.modeId, placement: this.placement, zarekId: this.selectedZarekId });

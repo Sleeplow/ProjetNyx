@@ -34,6 +34,8 @@ export interface AvatarOptions {
   teamColor?: number;
   label: string;
   barW?: number;
+  /** Mode « décor » (menu) : pas de barre de vie ni de nom, juste le personnage. */
+  decor?: boolean;
 }
 
 /** Accessoire de tête selon le rôle (repère local : +x = avant, +y = en travers). */
@@ -83,14 +85,20 @@ export function createAvatarVisual(scene: Phaser.Scene, def: ZarekDef, opts: Ava
   const pupilR = scene.add.circle(0, 0, r * 0.14, EYE_DARK, 1);
   const accessory = buildAccessory(scene, def, r);
 
-  const hpBack = scene.add.rectangle(-barW / 2, -(r + 22), barW, 9, COLORS.healthBack).setOrigin(0, 0.5).setStrokeStyle(2, 0x000000, 0.7);
-  const hpFill = scene.add.rectangle(-barW / 2, -(r + 22), barW, 9, COLORS.healthGood).setOrigin(0, 0.5);
-  const cubeText = scene.add.text(0, -(r + 36), '', { fontFamily: 'system-ui, sans-serif', fontSize: '14px', color: '#66e0ff', fontStyle: 'bold' }).setOrigin(0.5, 1);
-  const label = scene.add
-    .text(0, r + 6, opts.label, { fontFamily: 'system-ui, sans-serif', fontSize: opts.isSelf ? '15px' : '12px', color: opts.isSelf ? '#ffe066' : '#cfcfe6', fontStyle: opts.isSelf ? 'bold' : 'normal' })
-    .setOrigin(0.5, 0);
+  const decor = !!opts.decor;
+  const hpFill = decor ? null : scene.add.rectangle(-barW / 2, -(r + 22), barW, 9, COLORS.healthGood).setOrigin(0, 0.5);
+  const cubeText = decor ? null : scene.add.text(0, -(r + 36), '', { fontFamily: 'system-ui, sans-serif', fontSize: '14px', color: '#66e0ff', fontStyle: 'bold' }).setOrigin(0.5, 1);
 
-  const container = scene.add.container(0, 0, [shadow, ultGlow, barrel, body, highlight, eyeL, eyeR, pupilL, pupilR, accessory, hpBack, hpFill, cubeText, label]);
+  const children: Phaser.GameObjects.GameObject[] = [shadow, ultGlow, barrel, body, highlight, eyeL, eyeR, pupilL, pupilR, accessory];
+  if (!decor) {
+    const hpBack = scene.add.rectangle(-barW / 2, -(r + 22), barW, 9, COLORS.healthBack).setOrigin(0, 0.5).setStrokeStyle(2, 0x000000, 0.7);
+    const label = scene.add
+      .text(0, r + 6, opts.label, { fontFamily: 'system-ui, sans-serif', fontSize: opts.isSelf ? '15px' : '12px', color: opts.isSelf ? '#ffe066' : '#cfcfe6', fontStyle: opts.isSelf ? 'bold' : 'normal' })
+      .setOrigin(0.5, 0);
+    children.push(hpBack, hpFill!, cubeText!, label);
+  }
+
+  const container = scene.add.container(0, 0, children);
 
   return {
     container,
@@ -113,6 +121,7 @@ export function createAvatarVisual(scene: Phaser.Scene, def: ZarekDef, opts: Ava
       accessory.setPosition(ax * r * 0.42, ay * r * 0.42).setRotation(angle);
     },
     setHealth(ratio) {
+      if (!hpFill) return;
       const cl = Phaser.Math.Clamp(ratio, 0, 1);
       hpFill.width = barW * cl;
       hpFill.fillColor = cl > 0.35 ? COLORS.healthGood : COLORS.healthLow;
@@ -121,7 +130,7 @@ export function createAvatarVisual(scene: Phaser.Scene, def: ZarekDef, opts: Ava
       ultGlow.setVisible(on);
     },
     setCubes(n) {
-      cubeText.setText(n > 0 ? `◆${n}` : '');
+      cubeText?.setText(n > 0 ? `◆${n}` : '');
     },
     flashHit() {
       body.setFillStyle(COLORS.white);

@@ -947,7 +947,12 @@ export class GameScene extends Phaser.Scene {
       .setDepth(1002);
     this.spectateButtons.push(makeButton(this, cx + 95, by + 18, 170, 48, 'Suivant ›', () => this.advanceSpectate()));
     this.spectateButtons.push(makeButton(this, cx - 95, by + 18, 170, 48, 'Quitter', () => this.endGame(false), 0x3a3466));
-    for (const b of this.spectateButtons) b.setScrollFactor(0);
+    // Profondeur élevée : les boutons restent AU-DESSUS du décor (cloison, avatars,
+    // éclairs) qui a une profondeur bien plus haute que le défaut (0).
+    for (const b of this.spectateButtons) {
+      b.setScrollFactor(0);
+      b.container.setDepth(1002);
+    }
   }
 
   /** Passe au survivant suivant (ou revient au premier). */

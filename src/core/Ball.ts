@@ -26,13 +26,16 @@ export class Ball {
   kickerLockMs = 0;
   kickerId: string | null = null;
 
+  private readonly scene: Phaser.Scene;
   private readonly container: Phaser.GameObjects.Container;
   private readonly shadow: Phaser.GameObjects.Ellipse;
   private prevX: number;
   private prevY: number;
   private spin = 0;
+  private trailAccum = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
+    this.scene = scene;
     this.x = x;
     this.y = y;
     this.prevX = x;
@@ -148,6 +151,13 @@ export class Ball {
     const d = Math.hypot(dx, dy);
     if (d > 0.01) this.spin += (dx >= 0 ? 1 : -1) * (d / this.radius) * 0.6;
     this.container.setRotation(this.spin);
+    // Traînée : de brefs « fantômes » quand la balle file vite (tir/passe).
+    this.trailAccum += d;
+    if (d > 2.5 && this.trailAccum > 16) {
+      this.trailAccum = 0;
+      const g = this.scene.add.circle(this.x, this.y, this.radius * 0.85, 0xffffff, 0.32).setDepth(13);
+      this.scene.tweens.add({ targets: g, scale: 0.4, alpha: 0, duration: 260, onComplete: () => g.destroy() });
+    }
     this.prevX = this.x;
     this.prevY = this.y;
   }

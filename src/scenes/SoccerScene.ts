@@ -8,6 +8,7 @@ import { SoccerBot, type SoccerWorld } from '../ai/SoccerBot';
 import { PlayerController } from '../input/PlayerController';
 import { SoccerHud } from '../ui/SoccerHud';
 import { PITCH_NYXT } from '../maps/pitchNyxt';
+import { drawCartoonPitch } from '../render/pitchRender';
 import { ZAREKS, getZarek } from '../zareks/registry';
 import { COLORS } from '../config/constants';
 import { TEAM, BALL, SOCCER } from '../config/soccer';
@@ -96,66 +97,7 @@ export class SoccerScene extends Phaser.Scene {
   // ---------- Construction ----------
 
   private drawPitch(): void {
-    const { width, height } = this.pitch.map;
-    const cx = width / 2;
-    const cy = height / 2;
-
-    const GRASS = 0x2fa84f;
-    const GRASS_DARK = 0x2a9a48;
-    const LINE = 0xffffff;
-
-    // Pelouse + bandes tondues (alternance de deux verts, style stade).
-    this.add.rectangle(cx, cy, width, height, GRASS).setDepth(0);
-    const stripes = this.add.graphics().setDepth(0);
-    const band = 170;
-    stripes.fillStyle(GRASS_DARK, 1);
-    for (let x = 0; x < width; x += band * 2) stripes.fillRect(x, 0, band, height);
-
-    // Marquages du terrain : blanc, épais, façon cartoon.
-    const lines = this.add.graphics().setDepth(2);
-    lines.lineStyle(6, LINE, 0.9);
-    lines.strokeRect(28, 28, width - 56, height - 56); // touche
-    lines.lineBetween(cx, 28, cx, height - 28); // ligne médiane
-    lines.strokeCircle(cx, cy, 160); // rond central
-    lines.fillStyle(LINE, 0.9);
-    lines.fillCircle(cx, cy, 10); // point central
-    // Surfaces de réparation devant chaque but.
-    const boxW = 210;
-    const boxH = 440;
-    lines.strokeRect(28, cy - boxH / 2, boxW, boxH);
-    lines.strokeRect(width - 28 - boxW, cy - boxH / 2, boxW, boxH);
-
-    // Cadres de but, teintés couleur d'équipe (gauche = équipe 0, droite = équipe 1).
-    this.drawGoal(this.pitch.leftGoal.zone.x, this.pitch.leftGoal.zone.y, this.pitch.leftGoal.zone.h, TEAM.colorA);
-    this.drawGoal(this.pitch.rightGoal.zone.x, this.pitch.rightGoal.zone.y, this.pitch.rightGoal.zone.h, TEAM.colorB);
-
-    // Murs + blocs de couverture, en « haies » cartoon (face claire + contour épais).
-    for (const w of this.pitch.walls) this.drawBlock(w);
-    for (const o of this.pitch.map.obstacles) {
-      if (this.pitch.walls.includes(o)) continue;
-      this.drawBlock(o);
-    }
-  }
-
-  /** Un obstacle stylisé « haie » : base verte foncée, contour épais, liseré clair en haut. */
-  private drawBlock(o: { x: number; y: number; w: number; h: number }): void {
-    const bx = o.x + o.w / 2;
-    const by = o.y + o.h / 2;
-    this.add.rectangle(bx, by, o.w, o.h, 0x1f7a3d).setStrokeStyle(4, 0x123f22, 1).setDepth(9);
-    this.add.rectangle(bx, o.y + Math.min(12, o.h * 0.25), o.w - 8, Math.min(14, o.h * 0.28), 0x35b45f).setDepth(9);
-  }
-
-  private drawGoal(x: number, y: number, h: number, color: number): void {
-    const w = this.pitch.leftGoal.zone.w;
-    // Fond teinté équipe.
-    this.add.rectangle(x + w / 2, y + h / 2, w, h, color, 0.3).setDepth(2);
-    // Filet (petites hachures blanches).
-    const net = this.add.graphics().setDepth(2);
-    net.lineStyle(1.5, 0xffffff, 0.35);
-    for (let gx = x + 8; gx < x + w; gx += 12) net.lineBetween(gx, y, gx, y + h);
-    for (let gy = y + 8; gy < y + h; gy += 12) net.lineBetween(x, gy, x + w, gy);
-    // Cadre épais couleur d'équipe.
-    this.add.rectangle(x + w / 2, y + h / 2, w, h).setStrokeStyle(6, color, 1).setDepth(3);
+    drawCartoonPitch(this, this.pitch);
   }
 
   private spawnTeams(): void {
@@ -693,6 +635,26 @@ export class SoccerScene extends Phaser.Scene {
       const ring = this.add.circle(x, y, 40, color, 0.15).setStrokeStyle(6, color, 0.9).setDepth(26).setScale(0.2);
       this.tweens.add({ targets: ring, scale: 2 + i * 0.6, alpha: 0, duration: 520 + i * 120, ease: 'Cubic.out', onComplete: () => ring.destroy() });
     }
+    // Confettis qui giclent.
+    const palette = [color, COLORS.white, COLORS.ultReady, COLORS.healthGood];
+    for (let i = 0; i < 26; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 90 + Math.random() * 230;
+      const c = this.add.rectangle(x, y, 8, 12, palette[i % palette.length]).setDepth(27).setAngle(Math.random() * 360);
+      this.tweens.add({
+        targets: c,
+        x: x + Math.cos(ang) * spd,
+        y: y + Math.sin(ang) * spd + 70,
+        angle: c.angle + 360,
+        alpha: 0,
+        duration: 700 + Math.random() * 320,
+        ease: 'Quad.out',
+        onComplete: () => c.destroy(),
+      });
+    }
+    // Bref flash d'écran (sous le HUD).
+    const flash = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, COLORS.white, 0.32).setScrollFactor(0).setDepth(900);
+    this.tweens.add({ targets: flash, alpha: 0, duration: 260, onComplete: () => flash.destroy() });
   }
 
   private shockwaveFx(x: number, y: number, radius: number, color: number): void {

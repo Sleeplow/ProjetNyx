@@ -9,19 +9,16 @@ import type { ZarekDef } from '../core/types';
 import { stepMovement } from '../shared/game/movement';
 import { clamp, dist } from '../core/geometry';
 import { makeButton, type Button } from '../ui/widgets';
+import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
+import { drawCartoonPitch } from '../render/pitchRender';
 import type { MatchSnapshot, SnapPlayer, FxEvent } from '../shared/game/snapshot';
 
 interface Avatar {
-  container: Phaser.GameObjects.Container;
-  barrel: Phaser.GameObjects.Rectangle;
-  hpFill: Phaser.GameObjects.Rectangle;
-  glow: Phaser.GameObjects.Arc;
+  vis: AvatarVisual;
   zarekId: string;
   team: number;
   isSelf: boolean;
 }
-
-const BAR_W = 54;
 
 function zdef(id: string): ZarekDef {
   return ZAREK_BY_ID[id] ?? ZAREKS[0];
@@ -152,32 +149,31 @@ export class OnlineGameScene extends Phaser.Scene {
     for (const p of snap.players) {
       seen.add(p.i);
       if (!p.al) {
-        this.avatars.get(p.i)?.container.setVisible(false);
+        this.avatars.get(p.i)?.vis.container.setVisible(false);
         continue;
       }
       let av = this.avatars.get(p.i);
       if (!av || av.zarekId !== p.z || av.team !== p.t) {
-        av?.container.destroy();
+        av?.vis.destroy();
         av = this.spawnAvatar(p, p.i === meId);
       }
       const isSelf = p.i === meId;
       const tx = isSelf ? this.predX : p.x;
       const ty = isSelf ? this.predY : p.y;
       if (isSelf) {
-        av.container.setPosition(tx, ty);
+        av.vis.container.setPosition(tx, ty);
       } else {
-        av.container.x = Phaser.Math.Linear(av.container.x, tx, 0.35);
-        av.container.y = Phaser.Math.Linear(av.container.y, ty, 0.35);
+        av.vis.container.x = Phaser.Math.Linear(av.vis.container.x, tx, 0.35);
+        av.vis.container.y = Phaser.Math.Linear(av.vis.container.y, ty, 0.35);
       }
-      av.container.setVisible(true);
-      av.barrel.setRotation(p.a);
-      av.hpFill.width = BAR_W * clamp(p.h / p.hm, 0, 1);
-      av.hpFill.fillColor = p.h / p.hm > 0.35 ? COLORS.healthGood : COLORS.healthLow;
-      av.glow.setVisible(p.uc >= 100);
+      av.vis.container.setVisible(true);
+      av.vis.setAim(p.a);
+      av.vis.setHealth(p.hm > 0 ? p.h / p.hm : 0);
+      av.vis.setUltReady(p.uc >= 100);
     }
     for (const [id, av] of this.avatars) {
       if (!seen.has(id)) {
-        av.container.destroy();
+        av.vis.destroy();
         this.avatars.delete(id);
       }
     }
@@ -216,47 +212,57 @@ export class OnlineGameScene extends Phaser.Scene {
   // ---------- Rendu ----------
 
   private spawnAvatar(p: SnapPlayer, isSelf: boolean): Avatar {
-    const def = zdef(p.z);
-    const r = def.radius;
     const teamColor = p.t === 0 ? TEAM.colorA : TEAM.colorB;
-    const stroke = isSelf ? COLORS.playerAccent : teamColor;
-    const glow = this.add.circle(0, 0, r + 8, COLORS.ultReady, 0).setStrokeStyle(4, COLORS.ultReady, 0.9).setVisible(false);
-    const barrel = this.add.rectangle(0, 0, r + 16, 8, def.accent).setOrigin(0, 0.5);
-    const body = this.add.circle(0, 0, r, def.color).setStrokeStyle(isSelf ? 5 : 4, stroke);
-    const hpBack = this.add.rectangle(-BAR_W / 2, -(r + 18), BAR_W, 7, COLORS.healthBack).setOrigin(0, 0.5).setStrokeStyle(1, 0x000000, 0.6);
-    const hpFill = this.add.rectangle(-BAR_W / 2, -(r + 18), BAR_W, 7, COLORS.healthGood).setOrigin(0, 0.5);
-    const label = this.add
-      .text(0, r + 6, isSelf ? `${p.n} (toi)` : p.n, { fontFamily: 'system-ui, sans-serif', fontSize: isSelf ? '14px' : '12px', color: isSelf ? '#ffe066' : '#cfcfe6', fontStyle: isSelf ? 'bold' : 'normal' })
-      .setOrigin(0.5, 0);
-    const container = this.add.container(p.x, p.y, [glow, barrel, body, hpBack, hpFill, label]).setDepth(isSelf ? 20 : 15);
-    const av: Avatar = { container, barrel, hpFill, glow, zarekId: p.z, team: p.t, isSelf };
+    const vis = createAvatarVisual(this, zdef(p.z), { isSelf, teamColor, label: isSelf ? `${p.n} (toi)` : p.n });
+    vis.container.setPosition(p.x, p.y).setDepth(isSelf ? 20 : 15);
+    vis.popIn();
+    const av: Avatar = { vis, zarekId: p.z, team: p.t, isSelf };
     this.avatars.set(p.i, av);
     return av;
   }
 
   private makeBall(): Phaser.GameObjects.Container {
     const r = 20;
+    const shadow = this.add.ellipse(0, r * 0.9, r * 2.1, r * 0.9, 0x000000, 0.22);
     const body = this.add.circle(0, 0, r, COLORS.white).setStrokeStyle(3, 0x1a1a2e, 1);
     const dot = this.add.circle(0, 0, r * 0.34, 0x1a1a2e, 0.9);
     const s1 = this.add.circle(r * 0.55, -r * 0.35, r * 0.2, 0x1a1a2e, 0.7);
-    return this.add.container(PITCH_NYXT.centerX, PITCH_NYXT.centerY, [body, dot, s1]).setDepth(14);
+    const s2 = this.add.circle(-r * 0.55, r * 0.4, r * 0.2, 0x1a1a2e, 0.7);
+    return this.add.container(PITCH_NYXT.centerX, PITCH_NYXT.centerY, [shadow, body, dot, s1, s2]).setDepth(14);
   }
 
   private playFx(fx: FxEvent[]): void {
     for (const f of fx) {
       if (f.k === 'goal') {
         this.cameras.main.shake(260, 0.008);
+        const gc = (f.t ?? 0) === 0 ? TEAM.colorA : TEAM.colorB;
         for (let i = 0; i < 3; i++) {
-          const ring = this.add.circle(f.x, f.y, 40, (f.t ?? 0) === 0 ? TEAM.colorA : TEAM.colorB, 0.15).setStrokeStyle(6, (f.t ?? 0) === 0 ? TEAM.colorA : TEAM.colorB, 0.9).setDepth(26).setScale(0.2);
+          const ring = this.add.circle(f.x, f.y, 40, gc, 0.15).setStrokeStyle(6, gc, 0.9).setDepth(26).setScale(0.2);
           this.tweens.add({ targets: ring, scale: 2 + i * 0.6, alpha: 0, duration: 520 + i * 120, ease: 'Cubic.out', onComplete: () => ring.destroy() });
         }
+        const palette = [gc, COLORS.white, COLORS.ultReady, COLORS.healthGood];
+        for (let i = 0; i < 26; i++) {
+          const ang = Math.random() * Math.PI * 2;
+          const spd = 90 + Math.random() * 230;
+          const c = this.add.rectangle(f.x, f.y, 8, 12, palette[i % palette.length]).setDepth(27).setAngle(Math.random() * 360);
+          this.tweens.add({ targets: c, x: f.x + Math.cos(ang) * spd, y: f.y + Math.sin(ang) * spd + 70, angle: c.angle + 360, alpha: 0, duration: 700 + Math.random() * 320, ease: 'Quad.out', onComplete: () => c.destroy() });
+        }
+        const flash = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, COLORS.white, 0.32).setScrollFactor(0).setDepth(900);
+        this.tweens.add({ targets: flash, alpha: 0, duration: 260, onComplete: () => flash.destroy() });
       } else if (f.k === 'ult') {
         const ring = this.add.circle(f.x, f.y, f.r ?? 100, f.c ?? 0xffffff, 0.12).setStrokeStyle(8, f.c ?? 0xffffff, 0.9).setDepth(25).setScale(0.15);
         this.tweens.add({ targets: ring, scale: 1, duration: 320, ease: 'Cubic.out' });
         this.tweens.add({ targets: ring, alpha: 0, duration: 440, ease: 'Quad.in', onComplete: () => ring.destroy() });
       } else if (f.k === 'hit') {
-        const s = this.add.circle(f.x, f.y, 9, f.c ?? 0xffffff, 0.9).setDepth(24);
-        this.tweens.add({ targets: s, scale: 2, alpha: 0, duration: 180, onComplete: () => s.destroy() });
+        const color = f.c ?? 0xffffff;
+        const pop = this.add.circle(f.x, f.y, 10, COLORS.white, 0.95).setDepth(24);
+        this.tweens.add({ targets: pop, scale: 2.2, alpha: 0, duration: 160, ease: 'Quad.out', onComplete: () => pop.destroy() });
+        for (let i = 0; i < 6; i++) {
+          const ang = (i / 6) * Math.PI * 2 + Math.random() * 0.6;
+          const d = 18 + Math.random() * 12;
+          const shard = this.add.circle(f.x, f.y, 4, color, 1).setDepth(24);
+          this.tweens.add({ targets: shard, x: f.x + Math.cos(ang) * d, y: f.y + Math.sin(ang) * d, scale: 0.2, alpha: 0, duration: 220, ease: 'Cubic.out', onComplete: () => shard.destroy() });
+        }
       } else if (f.k === 'kick') {
         const ring = this.add.circle(f.x, f.y, 26, COLORS.white, 0.1).setStrokeStyle(4, COLORS.white, 0.8).setDepth(23).setScale(0.4);
         this.tweens.add({ targets: ring, scale: 1.2, alpha: 0, duration: 260, ease: 'Cubic.out', onComplete: () => ring.destroy() });
@@ -407,28 +413,6 @@ export class OnlineGameScene extends Phaser.Scene {
   }
 
   private drawPitch(): void {
-    const { width, height } = PITCH_NYXT.map;
-    const cx = width / 2;
-    const cy = height / 2;
-    this.add.rectangle(cx, cy, width, height, COLORS.arenaFloor).setDepth(0);
-    const grid = this.add.graphics().setDepth(1);
-    grid.lineStyle(1, COLORS.arenaGrid, 0.5);
-    for (let x = 0; x <= width; x += 80) grid.lineBetween(x, 0, x, height);
-    for (let y = 0; y <= height; y += 80) grid.lineBetween(0, y, width, y);
-    const lines = this.add.graphics().setDepth(2);
-    lines.lineStyle(4, 0x4a4680, 0.7);
-    lines.lineBetween(cx, 0, cx, height);
-    lines.strokeCircle(cx, cy, 150);
-    const drawGoal = (zx: number, zy: number, gh: number, gw: number, color: number) => {
-      this.add.rectangle(zx + gw / 2, zy + gh / 2, gw, gh, color, 0.22).setDepth(2);
-      this.add.rectangle(zx + gw / 2, zy + gh / 2, gw, gh).setStrokeStyle(5, color, 0.9).setDepth(3);
-    };
-    const lg = PITCH_NYXT.leftGoal.zone;
-    const rg = PITCH_NYXT.rightGoal.zone;
-    drawGoal(lg.x, lg.y, lg.h, lg.w, TEAM.colorA);
-    drawGoal(rg.x, rg.y, rg.h, rg.w, TEAM.colorB);
-    for (const o of PITCH_NYXT.map.obstacles) {
-      this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, COLORS.obstacle).setStrokeStyle(2, COLORS.obstacleEdge).setDepth(9);
-    }
+    drawCartoonPitch(this, PITCH_NYXT);
   }
 }

@@ -93,20 +93,32 @@ export class GameScene extends Phaser.Scene {
 
   private drawArena(): void {
     const { width, height } = this.map;
-    this.add.rectangle(width / 2, height / 2, width, height, COLORS.arenaFloor).setDepth(0);
 
-    const grid = this.add.graphics().setDepth(1);
-    grid.lineStyle(1, COLORS.arenaGrid, 0.5);
-    for (let x = 0; x <= width; x += 80) grid.lineBetween(x, 0, x, height);
-    for (let y = 0; y <= height; y += 80) grid.lineBetween(0, y, width, y);
-    grid.lineStyle(6, 0x3a3466, 1);
-    grid.strokeRect(0, 0, width, height);
-
-    for (const b of this.map.bushes) {
-      this.add.rectangle(b.x + b.w / 2, b.y + b.h / 2, b.w, b.h, COLORS.bush, 0.85).setStrokeStyle(3, COLORS.bushEdge, 0.9).setDepth(8);
+    // Sol « damier » cartoon (deux indigos proches → texture douce, plus vive
+    // que l'ancien fond plat).
+    const BASE = 0x2b2760;
+    const TILE = 0x342f76;
+    this.add.rectangle(width / 2, height / 2, width, height, BASE).setDepth(0);
+    const tiles = this.add.graphics().setDepth(0);
+    tiles.fillStyle(TILE, 1);
+    const ts = 120;
+    for (let ty = 0, ry = 0; ty < height; ty += ts, ry++) {
+      for (let tx = 0, rx = 0; tx < width; tx += ts, rx++) {
+        if ((rx + ry) % 2 === 0) tiles.fillRect(tx, ty, ts, ts);
+      }
     }
+    // Bordure épaisse et vive.
+    this.add.rectangle(width / 2, height / 2, width, height).setStrokeStyle(10, 0x7a5cff, 1).setDepth(7);
+
+    // Buissons : vert vif + liseré clair.
+    for (const b of this.map.bushes) {
+      this.add.rectangle(b.x + b.w / 2, b.y + b.h / 2, b.w, b.h, 0x2fae57, 0.9).setStrokeStyle(3, 0x53d97b, 0.9).setDepth(8);
+      this.add.rectangle(b.x + b.w / 2, b.y + Math.min(12, b.h * 0.22), b.w - 8, Math.min(12, b.h * 0.24), 0x5fe08d, 0.9).setDepth(8);
+    }
+    // Obstacles : blocs « pierre » cartoon (face claire + contour épais).
     for (const o of this.map.obstacles) {
-      this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, COLORS.obstacle).setStrokeStyle(3, COLORS.obstacleEdge).setDepth(9);
+      this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, 0x4a4788).setStrokeStyle(4, 0x241f45, 1).setDepth(9);
+      this.add.rectangle(o.x + o.w / 2, o.y + Math.min(12, o.h * 0.25), o.w - 8, Math.min(14, o.h * 0.28), 0x6f69b8).setDepth(9);
     }
   }
 

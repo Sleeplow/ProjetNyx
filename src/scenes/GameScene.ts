@@ -22,6 +22,9 @@ import { clamp, dist, normalize, resolveCircleRect, pointInRect, circleHitsRect 
 
 const TAU = Math.PI * 2;
 
+/** Répit d'invincibilité à la sortie d'un portail : le temps de comprendre où on est. */
+const TELEPORT_INVULN_MS = 1200;
+
 /**
  * Scène de jeu principale. Orchestre la simulation : entrées → déplacement →
  * actions → projectiles → zone → morts → rendu. Le mode et les Zareks sont
@@ -218,6 +221,16 @@ export class GameScene extends Phaser.Scene {
         gp.arc(ep.x, ep.y, rr - 12, a0, a0 + 1.15);
         gp.strokePath();
       }
+    }
+
+    // Bouclier d'arrivée : anneau pulsé autour des combattants brièvement invincibles.
+    for (const c of this.combatants) {
+      if (!c.alive || c.invulnMs <= 0) continue;
+      const sr = c.def.radius + 12 + 2 * Math.sin(this.fxTime / 90);
+      gp.lineStyle(3, 0xd6f6ff, 0.9);
+      gp.strokeCircle(c.x, c.y, sr);
+      gp.lineStyle(2, 0x9be8ff, 0.5);
+      gp.strokeCircle(c.x, c.y, sr + 4);
     }
   }
 
@@ -443,6 +456,9 @@ export class GameScene extends Phaser.Scene {
     this.separateCombatants();
 
     // 2bis) Portails : un combattant qui marche sur un portail est téléporté.
+    //       À l'arrivée : bref répit d'invincibilité + éclat visuel, et pour le
+    //       joueur on recale la caméra d'un coup (pas de long pano qui donne
+    //       l'impression que « ça fige »).
     if (this.isPortal) {
       for (const c of this.combatants) {
         if (!c.alive) continue;
@@ -450,6 +466,12 @@ export class GameScene extends Phaser.Scene {
           c.x = clamp(c.x, c.def.radius, this.map.width - c.def.radius);
           c.y = clamp(c.y, c.def.radius, this.map.height - c.def.radius);
           c.inBush = this.map.bushes.some((b) => pointInRect(c.x, c.y, b));
+          c.grantInvuln(TELEPORT_INVULN_MS);
+          this.teleportBurst(c.x, c.y);
+          if (c.isPlayer) {
+            this.camX = c.x;
+            this.camY = c.y;
+          }
         }
       }
     }
@@ -954,6 +976,12 @@ export class GameScene extends Phaser.Scene {
     const ring = this.add.circle(x, y, radius, color, 0.12).setStrokeStyle(8, color, 0.9).setDepth(25).setScale(0.15);
     this.tweens.add({ targets: ring, scale: 1, duration: 320, ease: 'Cubic.out' });
     this.tweens.add({ targets: ring, alpha: 0, duration: 440, ease: 'Quad.in', onComplete: () => ring.destroy() });
+  }
+
+  /** Éclat d'arrivée de portail : anneau clair qui s'ouvre à la sortie. */
+  private teleportBurst(x: number, y: number): void {
+    const ring = this.add.circle(x, y, 46, 0x9be8ff, 0.16).setStrokeStyle(5, 0xd6f6ff, 0.95).setDepth(19).setScale(0.4);
+    this.tweens.add({ targets: ring, scale: 1.25, alpha: 0, duration: 380, ease: 'Cubic.out', onComplete: () => ring.destroy() });
   }
 
   private hitSpark(x: number, y: number, color: number): void {

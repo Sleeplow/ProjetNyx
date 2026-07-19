@@ -35,6 +35,10 @@ export class Combatant {
   /** Ralentissement actif restant (ms) et facteur de vitesse pendant celui-ci. */
   slowTimer = 0;
   slowFactor = 1;
+  /** Invincibilité restante (ms) — ex. bref répit à la sortie d'un portail. */
+  invulnMs = 0;
+  /** Anti-spam du flash « touché » : temps avant le prochain flash autorisé (ms). */
+  private flashCd = 0;
   /** Vitesse de recul (knockback) en cours, décroît avec le temps. */
   kbX = 0;
   kbY = 0;
@@ -88,9 +92,18 @@ export class Combatant {
     return Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1);
   }
 
+  get invulnerable(): boolean {
+    return this.invulnMs > 0;
+  }
+
+  /** Accorde un bref répit d'invincibilité (sortie de portail, etc.). */
+  grantInvuln(ms: number): void {
+    this.invulnMs = Math.max(this.invulnMs, ms);
+  }
+
   /** Applique des dégâts. Renvoie les dégâts réellement infligés (pour la charge d'ultimate). */
   takeDamage(amount: number): number {
-    if (!this.alive) return 0;
+    if (!this.alive || this.invulnMs > 0) return 0;
     if (amount > 0) this.sinceCombatMs = 0; // subir des dégâts interrompt la régén
     const before = this.health;
     this.health = Math.max(0, this.health - amount);
@@ -150,6 +163,8 @@ export class Combatant {
   tickTimers(dtMs: number): void {
     if (this.reloadTimer > 0) this.reloadTimer -= dtMs;
     if (this.slowTimer > 0) this.slowTimer -= dtMs;
+    if (this.invulnMs > 0) this.invulnMs -= dtMs;
+    if (this.flashCd > 0) this.flashCd -= dtMs;
     this.sinceCombatMs += dtMs;
   }
 
@@ -172,8 +187,12 @@ export class Combatant {
     this.vis.container.setPosition(this.x, this.y);
     this.vis.setAim(this.aimAngle);
 
-    // Flash « touché » (déclenché dès que la vie baisse).
-    if (this.health < this.lastHealth) this.vis.flashHit();
+    // Flash « touché » — bridé (flashCd) pour ne pas se re-déclencher chaque
+    // frame sous des dégâts continus (gaz, poison) et inonder le moteur de tweens.
+    if (this.health < this.lastHealth - 0.5 && this.flashCd <= 0) {
+      this.vis.flashHit();
+      this.flashCd = 220;
+    }
     this.lastHealth = this.health;
 
     this.vis.setHealth(this.healthRatio);
@@ -199,6 +218,8 @@ export class Combatant {
     if (fullHeal) this.health = this.maxHealth;
     this.slowTimer = 0;
     this.slowFactor = 1;
+    this.invulnMs = 0;
+    this.flashCd = 0;
     this.poisonMs = 0;
     this.poisonDps = 0;
     this.kbX = 0;

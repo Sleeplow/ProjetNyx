@@ -1,7 +1,7 @@
 const STORAGE_KEY = 'nyxt.server';
 
 /** Adresse fixe du serveur de jeu (sous-domaine du domaine, HTTPS/WSS auto via Caddy). */
-const DEFAULT_SERVER = 'wss://game.sleeplow.ca';
+const DEFAULT_SERVER = 'wss://gamenyxt.sleeplow.ca';
 
 /**
  * URL du serveur temps-réel, configurable À L'EXÉCUTION (sans re-déployer) :

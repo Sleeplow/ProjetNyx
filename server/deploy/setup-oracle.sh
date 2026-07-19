@@ -14,7 +14,7 @@
 #   PORT=2567                 port interne du serveur (derrière Caddy)
 set -euo pipefail
 
-DOMAIN="${DOMAIN:-game.sleeplow.ca}"
+DOMAIN="${DOMAIN:-gamenyxt.sleeplow.ca}"
 BRANCH="${BRANCH:-qa}"
 PORT="${PORT:-2567}"
 APP_DIR=/opt/nyxt

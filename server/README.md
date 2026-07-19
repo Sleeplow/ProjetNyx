@@ -39,11 +39,11 @@ Après une modification du code serveur, régénérer le bundle avant de committ
 npm run build:server
 ```
 
-## Hébergement durable (recommandé) : adresse fixe `wss://game.sleeplow.ca`
+## Hébergement durable (recommandé) : adresse fixe `wss://gamenyxt.sleeplow.ca`
 
-Le client vise par défaut **`wss://game.sleeplow.ca`** une fois déployé (voir
+Le client vise par défaut **`wss://gamenyxt.sleeplow.ca`** une fois déployé (voir
 `src/net/config.ts`). L'idée : une petite machine toujours allumée fait tourner
-le serveur, et le sous-domaine `game.sleeplow.ca` (géré dans la zone DNS du
+le serveur, et le sous-domaine `gamenyxt.sleeplow.ca` (géré dans la zone DNS du
 domaine) pointe dessus. Plus d'URL au hasard.
 
 ### Machine : Oracle Cloud Always Free (Ubuntu, région Montréal)
@@ -54,7 +54,7 @@ domaine) pointe dessus. Plus d'URL au hasard.
    (`VM.Standard.E2.1.Micro` ou `A1.Flex`), avec IP publique + clé SSH.
 3. **Security List** de la machine : ouvrir en entrée **TCP 80 et 443**
    (`0.0.0.0/0`).
-4. **DNS** (WHC) : ajouter un enregistrement **A** `game` → l'IP publique de la
+4. **DNS** (WHC) : ajouter un enregistrement **A** `gamenyxt` → l'IP publique de la
    machine (même endroit que le `nyxt` vers GitHub Pages).
 5. **Installer le serveur** (en SSH sur la machine) :
    ```bash
@@ -65,7 +65,7 @@ domaine) pointe dessus. Plus d'URL au hasard.
    pare-feu interne, télécharge le bundle, crée un service qui redémarre tout
    seul, et **obtient le certificat HTTPS automatiquement** pour le domaine.
 
-Ensuite le jeu se connecte à `wss://game.sleeplow.ca` sans rien à configurer.
+Ensuite le jeu se connecte à `wss://gamenyxt.sleeplow.ca` sans rien à configurer.
 Mettre le serveur à jour = relancer `sudo bash setup.sh`.
 
 ## Tunnel (dépannage / test rapide seulement)

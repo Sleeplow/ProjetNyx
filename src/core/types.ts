@@ -33,7 +33,7 @@ export function emptyInput(): InputState {
 export type ZarekRole = 'sharpshooter' | 'tank' | 'assassin' | 'support' | 'mage';
 
 /** Type d'attaque de base. Extensible : ajouter un `kind` = ajouter un comportement. */
-export type AttackKind = 'projectile' | 'potion';
+export type AttackKind = 'projectile' | 'potion' | 'chain';
 
 /** Définition de l'attaque de base d'un Zarek. */
 export interface AttackDef {
@@ -59,10 +59,16 @@ export interface AttackDef {
   aoeDurationMs?: number;
   /** (kind 'potion') Dégâts par seconde infligés dans la flaque. */
   aoeDps?: number;
+  /** (kind 'chain') Portée de rebond vers la cible suivante (px). */
+  chainJumpRange?: number;
+  /** (kind 'chain') Nombre de REBONDS après la première cible (2 → 3 cibles). */
+  chainMaxJumps?: number;
+  /** (kind 'chain') Facteur de dégâts appliqué à CHAQUE rebond (0.7 = −30 %). */
+  chainFalloff?: number;
 }
 
 /** Type d'ultimate. Extensible de la même façon que les attaques. */
-export type UltimateKind = 'shockwave' | 'aura';
+export type UltimateKind = 'shockwave' | 'aura' | 'chain';
 
 /** Définition de l'ultimate d'un Zarek. */
 export interface UltimateDef {
@@ -84,6 +90,10 @@ export interface UltimateDef {
   poisonMs?: number;
   /** (kind 'aura') Dégâts par seconde du poison. */
   poisonDps?: number;
+  /** (kind 'chain') Portée de rebond de la méga-chaîne (px). */
+  chainJumpRange?: number;
+  /** (kind 'chain') Nombre de rebonds de la méga-chaîne. */
+  chainMaxJumps?: number;
 }
 
 /** Définition complète d'un Zarek (personnage jouable). Pilotée par les données. */

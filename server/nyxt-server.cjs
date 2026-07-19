@@ -34735,8 +34735,53 @@ var HECATE = {
   ultChargePerDamage: 0.06
 };
 
+// src/zareks/astrape.ts
+var ASTRAPE = {
+  id: "astrape",
+  name: "Astrap\xE9",
+  role: "mage",
+  description: "Mage foudre, fragile. Attaque : \xE9clair en cha\xEEne qui rebondit d\u2019ennemi en ennemi (d\xE9g\xE2ts d\xE9croissants). Ultimate : Surcharge \u2014 un \xE9clair g\xE9ant frappe plusieurs ennemis et les \xE9tourdit.",
+  color: 16765503,
+  accent: 16774064,
+  maxHealth: 850,
+  moveSpeed: 220,
+  radius: 22,
+  attack: {
+    kind: "chain",
+    label: "\xC9clair en cha\xEEne",
+    reloadMs: 850,
+    count: 1,
+    spreadDeg: 0,
+    damage: 210,
+    range: 360,
+    // portée de la première cible
+    speed: 0,
+    // instantané (pas de projectile)
+    projRadius: 0,
+    chainJumpRange: 230,
+    chainMaxJumps: 2,
+    // 1ʳᵉ cible + 2 rebonds = 3 cibles
+    chainFalloff: 0.68
+  },
+  ultimate: {
+    kind: "chain",
+    label: "Surcharge",
+    damage: 520,
+    radius: 340,
+    // portée de la première cible de l'ult
+    knockback: 200,
+    slowMs: 1300,
+    slowFactor: 0.5,
+    chainJumpRange: 320,
+    chainMaxJumps: 5
+    // jusqu'à 6 cibles
+  },
+  // Charge d'ult LENTE (ult puissant) — ~0,035 → il faut infliger ~2860 dégâts.
+  ultChargePerDamage: 0.035
+};
+
 // src/zareks/registry.ts
-var ZAREKS = [ZEPHYR, ATLAS, HECATE];
+var ZAREKS = [ZEPHYR, ATLAS, HECATE, ASTRAPE];
 var ZAREK_BY_ID = Object.fromEntries(
   ZAREKS.map((z) => [z.id, z])
 );
@@ -34928,6 +34973,35 @@ var SoccerBot = class {
     return best;
   }
 };
+
+// src/shared/game/chain.ts
+function resolveChain(sx, sy, nodes, firstRange, jumpRange, maxJumps) {
+  const hits = [];
+  const used = /* @__PURE__ */ new Set();
+  let cx = sx;
+  let cy = sy;
+  let range = firstRange;
+  for (let step = 0; step <= maxJumps; step++) {
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < nodes.length; i++) {
+      if (used.has(i)) continue;
+      const n = nodes[i];
+      const d = Math.hypot(n.x - cx, n.y - cy);
+      if (d <= range + n.radius && d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    if (best < 0) break;
+    used.add(best);
+    hits.push(best);
+    cx = nodes[best].x;
+    cy = nodes[best].y;
+    range = jumpRange;
+  }
+  return hits;
+}
 
 // src/shared/game/MatchSim.ts
 var LOBBY_MS = 3e4;
@@ -35540,6 +35614,12 @@ var MatchSim = class {
   }
   fireAttack(c) {
     const a = c.def.attack;
+    if (a.kind === "chain") {
+      this.fireChain(c);
+      c.reloadTimer = a.reloadMs;
+      c.noteAttack();
+      return;
+    }
     if (a.kind === "potion") {
       const dx = Math.cos(c.aimAngle);
       const dy = Math.sin(c.aimAngle);
@@ -35563,6 +35643,62 @@ var MatchSim = class {
     }
     c.reloadTimer = a.reloadMs;
     c.noteAttack();
+  }
+  /** Éclair en chaîne (serveur) : dégâts + segments d'éclair diffusés en fx. */
+  fireChain(c) {
+    const a = c.def.attack;
+    const enemies = this.combatants.filter((o) => o.alive && o.team !== c.team);
+    const idx = resolveChain(
+      c.x,
+      c.y,
+      enemies.map((e) => ({ x: e.x, y: e.y, radius: e.def.radius })),
+      a.range,
+      a.chainJumpRange ?? 220,
+      a.chainMaxJumps ?? 2
+    );
+    let dmg = a.damage * c.damageMult;
+    let px = c.x;
+    let py = c.y;
+    for (const i of idx) {
+      const e = enemies[i];
+      const dealt = e.takeDamage(dmg);
+      c.addUltCharge(dealt);
+      this.fx.push({ k: "bolt", x: px, y: py, x2: e.x, y2: e.y, c: c.def.color });
+      this.fx.push({ k: "hit", x: e.x, y: e.y, c: c.def.color });
+      px = e.x;
+      py = e.y;
+      dmg *= a.chainFalloff ?? 0.7;
+    }
+  }
+  /** Surcharge (serveur) : méga-chaîne, gros dégâts + étourdit (ralentit). */
+  fireUltChain(c) {
+    const u = c.def.ultimate;
+    const enemies = this.combatants.filter((o) => o.alive && o.team !== c.team);
+    const idx = resolveChain(
+      c.x,
+      c.y,
+      enemies.map((e) => ({ x: e.x, y: e.y, radius: e.def.radius })),
+      u.radius,
+      u.chainJumpRange ?? 300,
+      u.chainMaxJumps ?? 5
+    );
+    const dmg = u.damage * c.damageMult;
+    this.fx.push({ k: "ult", x: c.x, y: c.y, r: 90, c: c.def.color });
+    let px = c.x;
+    let py = c.y;
+    for (const i of idx) {
+      const e = enemies[i];
+      e.takeDamage(dmg);
+      const dir = normalize(e.x - c.x, e.y - c.y);
+      const kx = dir.x === 0 && dir.y === 0 ? 1 : dir.x;
+      const ky = dir.x === 0 && dir.y === 0 ? 0 : dir.y;
+      e.applyKnockback(kx, ky, u.knockback);
+      e.applySlow(u.slowMs, u.slowFactor);
+      this.fx.push({ k: "bolt", x: px, y: py, x2: e.x, y2: e.y, c: c.def.color });
+      this.fx.push({ k: "hit", x: e.x, y: e.y, c: c.def.color });
+      px = e.x;
+      py = e.y;
+    }
   }
   updateProjectiles(dtSec) {
     for (const p of this.projectiles) {
@@ -35650,6 +35786,8 @@ var MatchSim = class {
       h.poisonMs = u.poisonMs ?? 2500;
       h.poisonDps = (u.poisonDps ?? 100) * c.damageMult;
       this.hazards.push(h);
+    } else if (u.kind === "chain") {
+      this.fireUltChain(c);
     } else {
       const dmg = u.damage * c.damageMult;
       this.fx.push({ k: "ult", x: c.x, y: c.y, r: u.radius, c: c.def.color });

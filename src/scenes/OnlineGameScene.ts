@@ -11,6 +11,7 @@ import { clamp, dist } from '../core/geometry';
 import { makeButton, type Button } from '../ui/widgets';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { drawCartoonPitch } from '../render/pitchRender';
+import { drawChainBolt } from '../render/fx';
 import type { MatchSnapshot, SnapPlayer, FxEvent } from '../shared/game/snapshot';
 
 interface Avatar {
@@ -269,6 +270,8 @@ export class OnlineGameScene extends Phaser.Scene {
       } else if (f.k === 'death') {
         const s = this.add.circle(f.x, f.y, 26, f.c ?? 0xffffff, 0.5).setStrokeStyle(4, f.c ?? 0xffffff, 1).setDepth(24).setScale(0.6);
         this.tweens.add({ targets: s, scale: 2.6, alpha: 0, duration: 440, ease: 'Cubic.out', onComplete: () => s.destroy() });
+      } else if (f.k === 'bolt') {
+        drawChainBolt(this, f.x, f.y, f.x2 ?? f.x, f.y2 ?? f.y, f.c ?? 0xffffff);
       }
     }
   }

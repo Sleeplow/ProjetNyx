@@ -6,6 +6,7 @@ import { COLORS, REGEN } from '../../config/constants';
 import { ZAREKS, ZAREK_BY_ID, getZarek } from '../../zareks/registry';
 import { SoccerBot, type SoccerWorld } from '../../ai/SoccerBot';
 import { clamp, dist, normalize, resolveCircleRect, circleHitsRect, pointInRect } from '../../core/geometry';
+import { resolveChain } from './chain';
 import type { MatchPhase, MatchSnapshot, FxEvent, SnapPlayer } from './snapshot';
 
 const LOBBY_MS = 30000; // compte à rebours de la salle d'attente (bouton Démarrer pour lancer avant)
@@ -692,6 +693,12 @@ export class MatchSim {
 
   private fireAttack(c: SimCombatant): void {
     const a = c.def.attack;
+    if (a.kind === 'chain') {
+      this.fireChain(c);
+      c.reloadTimer = a.reloadMs;
+      c.noteAttack();
+      return;
+    }
     if (a.kind === 'potion') {
       const dx = Math.cos(c.aimAngle);
       const dy = Math.sin(c.aimAngle);
@@ -715,6 +722,64 @@ export class MatchSim {
     }
     c.reloadTimer = a.reloadMs;
     c.noteAttack();
+  }
+
+  /** Éclair en chaîne (serveur) : dégâts + segments d'éclair diffusés en fx. */
+  private fireChain(c: SimCombatant): void {
+    const a = c.def.attack;
+    const enemies = this.combatants.filter((o) => o.alive && o.team !== c.team);
+    const idx = resolveChain(
+      c.x,
+      c.y,
+      enemies.map((e) => ({ x: e.x, y: e.y, radius: e.def.radius })),
+      a.range,
+      a.chainJumpRange ?? 220,
+      a.chainMaxJumps ?? 2,
+    );
+    let dmg = a.damage * c.damageMult;
+    let px = c.x;
+    let py = c.y;
+    for (const i of idx) {
+      const e = enemies[i];
+      const dealt = e.takeDamage(dmg);
+      c.addUltCharge(dealt);
+      this.fx.push({ k: 'bolt', x: px, y: py, x2: e.x, y2: e.y, c: c.def.color });
+      this.fx.push({ k: 'hit', x: e.x, y: e.y, c: c.def.color });
+      px = e.x;
+      py = e.y;
+      dmg *= a.chainFalloff ?? 0.7;
+    }
+  }
+
+  /** Surcharge (serveur) : méga-chaîne, gros dégâts + étourdit (ralentit). */
+  private fireUltChain(c: SimCombatant): void {
+    const u = c.def.ultimate;
+    const enemies = this.combatants.filter((o) => o.alive && o.team !== c.team);
+    const idx = resolveChain(
+      c.x,
+      c.y,
+      enemies.map((e) => ({ x: e.x, y: e.y, radius: e.def.radius })),
+      u.radius,
+      u.chainJumpRange ?? 300,
+      u.chainMaxJumps ?? 5,
+    );
+    const dmg = u.damage * c.damageMult;
+    this.fx.push({ k: 'ult', x: c.x, y: c.y, r: 90, c: c.def.color });
+    let px = c.x;
+    let py = c.y;
+    for (const i of idx) {
+      const e = enemies[i];
+      e.takeDamage(dmg);
+      const dir = normalize(e.x - c.x, e.y - c.y);
+      const kx = dir.x === 0 && dir.y === 0 ? 1 : dir.x;
+      const ky = dir.x === 0 && dir.y === 0 ? 0 : dir.y;
+      e.applyKnockback(kx, ky, u.knockback);
+      e.applySlow(u.slowMs, u.slowFactor);
+      this.fx.push({ k: 'bolt', x: px, y: py, x2: e.x, y2: e.y, c: c.def.color });
+      this.fx.push({ k: 'hit', x: e.x, y: e.y, c: c.def.color });
+      px = e.x;
+      py = e.y;
+    }
   }
 
   private updateProjectiles(dtSec: number): void {
@@ -809,6 +874,8 @@ export class MatchSim {
       h.poisonMs = u.poisonMs ?? 2500;
       h.poisonDps = (u.poisonDps ?? 100) * c.damageMult;
       this.hazards.push(h);
+    } else if (u.kind === 'chain') {
+      this.fireUltChain(c);
     } else {
       const dmg = u.damage * c.damageMult;
       this.fx.push({ k: 'ult', x: c.x, y: c.y, r: u.radius, c: c.def.color });

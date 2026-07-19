@@ -29,14 +29,16 @@ export interface SnapEntity {
   c: number; // couleur
 }
 
-/** Effet transitoire à jouer côté client (tir, ultime, but, frappe…). */
+/** Effet transitoire à jouer côté client (tir, ultime, but, frappe, éclair…). */
 export interface FxEvent {
-  k: 'hit' | 'ult' | 'goal' | 'kick' | 'death';
+  k: 'hit' | 'ult' | 'goal' | 'kick' | 'death' | 'bolt';
   x: number;
   y: number;
   r?: number;
   c?: number;
   t?: number; // équipe (pour un but)
+  x2?: number; // (kind 'bolt') extrémité de l'éclair
+  y2?: number;
 }
 
 export interface MatchSnapshot {

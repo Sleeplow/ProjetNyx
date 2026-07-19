@@ -10,6 +10,8 @@ import { BotController, type BotWorld } from '../ai/BotController';
 import { PlayerController } from '../input/PlayerController';
 import { Hud } from '../ui/Hud';
 import { ARENA_ROYALE } from '../maps/arenaRoyale';
+import { resolveChain } from '../shared/game/chain';
+import { drawChainBolt } from '../render/fx';
 import { ZAREKS, getZarek } from '../zareks/registry';
 import { COLORS, POWER_CUBE, PLAYERS_PER_MATCH, BUSH } from '../config/constants';
 import { clamp, dist, normalize, resolveCircleRect, pointInRect, circleHitsRect } from '../core/geometry';
@@ -430,6 +432,8 @@ export class GameScene extends Phaser.Scene {
     const a = c.def.attack;
     if (a.kind === 'potion') {
       this.throwPotion(c);
+    } else if (a.kind === 'chain') {
+      this.fireChain(c);
     } else {
       const spread = Phaser.Math.DegToRad(a.spreadDeg);
       const dmg = a.damage * c.damageMult;
@@ -446,6 +450,64 @@ export class GameScene extends Phaser.Scene {
     }
     c.reloadTimer = a.reloadMs;
     c.noteAttack();
+  }
+
+  /** Éclair en chaîne : foudroie l'ennemi le plus proche puis rebondit (dégâts décroissants). */
+  private fireChain(c: Combatant): void {
+    const a = c.def.attack;
+    const enemies = this.combatants.filter((o) => o !== c && o.alive);
+    const idx = resolveChain(
+      c.x,
+      c.y,
+      enemies.map((e) => ({ x: e.x, y: e.y, radius: e.def.radius })),
+      a.range,
+      a.chainJumpRange ?? 220,
+      a.chainMaxJumps ?? 2,
+    );
+    let dmg = a.damage * c.damageMult;
+    let px = c.x;
+    let py = c.y;
+    for (const i of idx) {
+      const e = enemies[i];
+      const dealt = e.takeDamage(dmg);
+      c.addUltCharge(dealt);
+      drawChainBolt(this, px, py, e.x, e.y, c.def.color);
+      this.hitSpark(e.x, e.y, c.def.color);
+      px = e.x;
+      py = e.y;
+      dmg *= a.chainFalloff ?? 0.7;
+    }
+  }
+
+  /** Surcharge : un éclair géant arc vers de nombreux ennemis, gros dégâts + les étourdit. */
+  private fireUltChain(c: Combatant): void {
+    const u = c.def.ultimate;
+    const enemies = this.combatants.filter((o) => o !== c && o.alive);
+    const idx = resolveChain(
+      c.x,
+      c.y,
+      enemies.map((e) => ({ x: e.x, y: e.y, radius: e.def.radius })),
+      u.radius,
+      u.chainJumpRange ?? 300,
+      u.chainMaxJumps ?? 5,
+    );
+    const dmg = u.damage * c.damageMult;
+    let px = c.x;
+    let py = c.y;
+    for (const i of idx) {
+      const e = enemies[i];
+      e.takeDamage(dmg);
+      const dir = normalize(e.x - c.x, e.y - c.y);
+      const kx = dir.x === 0 && dir.y === 0 ? 1 : dir.x;
+      const ky = dir.x === 0 && dir.y === 0 ? 0 : dir.y;
+      e.applyKnockback(kx, ky, u.knockback);
+      e.applySlow(u.slowMs, u.slowFactor);
+      drawChainBolt(this, px, py, e.x, e.y, c.def.color, 6);
+      this.hitSpark(e.x, e.y, c.def.color);
+      px = e.x;
+      py = e.y;
+    }
+    this.shockwaveFx(c.x, c.y, 90, c.def.color);
   }
 
   /** Lance une potion : elle vole vers la visée puis crée une flaque à l'atterrissage. */
@@ -506,6 +568,8 @@ export class GameScene extends Phaser.Scene {
     const u = c.def.ultimate;
     if (u.kind === 'aura') {
       this.spawnPoisonAura(c);
+    } else if (u.kind === 'chain') {
+      this.fireUltChain(c);
     } else {
       const dmg = u.damage * c.damageMult;
       this.shockwaveFx(c.x, c.y, u.radius, c.def.color);

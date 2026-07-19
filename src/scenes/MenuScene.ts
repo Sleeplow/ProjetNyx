@@ -1,10 +1,17 @@
 import Phaser from 'phaser';
-import { makeButton } from '../ui/widgets';
-import { createAvatarVisual } from '../render/avatarVisual';
+import { makeButton, nightBackground } from '../ui/widgets';
+import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { ZAREK_BY_ID, ZAREKS } from '../zareks/registry';
 
 /** Écran d'accueil — animé pour donner le ton dès l'arrivée. */
 export class MenuScene extends Phaser.Scene {
+  private mascots: { vis: AvatarVisual; aim: number }[] = [];
+  /** Vrai dès qu'une souris est détectée (survol) : sinon on est en tactile. */
+  private usingMouse = false;
+  /** Cible « au repos » que les mascottes regardent (le titre). */
+  private idleX = 0;
+  private idleY = 0;
+
   constructor() {
     super('Menu');
   }
@@ -14,8 +21,19 @@ export class MenuScene extends Phaser.Scene {
     const h = this.scale.height;
     const cx = w / 2;
 
-    this.buildBackground(w, h);
+    this.mascots = [];
+    this.usingMouse = false;
+    this.idleX = cx;
+    this.idleY = h * 0.34;
+
+    nightBackground(this);
     this.buildMascots(w, h, cx);
+
+    // Suivi du pointeur : une souris qui survole → on la suit ; en tactile,
+    // seul un doigt posé compte (voir update()).
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (!p.wasTouch) this.usingMouse = true;
+    });
 
     // Lune stylisée + halo derrière le titre (thème Nyxt).
     this.add.circle(cx, h * 0.28, 110, 0x6a4dff, 0.12).setDepth(-60);
@@ -59,26 +77,6 @@ export class MenuScene extends Phaser.Scene {
     this.buildVersionTag(w, h);
   }
 
-  /** Fond animé : dégradé nocturne, étoiles scintillantes, halos qui dérivent. */
-  private buildBackground(w: number, h: number): void {
-    const g = this.add.graphics().setDepth(-100);
-    g.fillGradientStyle(0x241a5c, 0x241a5c, 0x080610, 0x080610, 1);
-    g.fillRect(0, 0, w, h);
-
-    for (let i = 0; i < 52; i++) {
-      const star = this.add.circle(Math.random() * w, Math.random() * h * 0.92, Math.random() * 1.8 + 0.6, 0xffffff, Math.random() * 0.5 + 0.3).setDepth(-95);
-      this.tweens.add({ targets: star, alpha: 0.08, duration: 900 + Math.random() * 1700, yoyo: true, repeat: -1, delay: Math.random() * 1600, ease: 'Sine.inOut' });
-    }
-
-    const orbColors = [0x6a4dff, 0x2f8f5a, 0x8a5cff];
-    for (let i = 0; i < 3; i++) {
-      const ox = w * (0.22 + 0.28 * i);
-      const oy = h * (0.32 + 0.22 * (i % 2));
-      const orb = this.add.circle(ox, oy, 160 + i * 40, orbColors[i], 0.1).setDepth(-92);
-      this.tweens.add({ targets: orb, x: ox + (Math.random() * 120 - 60), y: oy + (Math.random() * 120 - 60), alpha: 0.17, duration: 4200 + i * 1100, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
-    }
-  }
-
   /** Quelques Zareks « cartoon » qui flottent en arrière-plan et regardent le titre. */
   private buildMascots(w: number, h: number, cx: number): void {
     const macs = [
@@ -90,9 +88,25 @@ export class MenuScene extends Phaser.Scene {
       const def = ZAREK_BY_ID[m.id] ?? ZAREKS[0];
       const vis = createAvatarVisual(this, def, { isSelf: false, label: '', decor: true });
       vis.container.setPosition(m.x, m.y).setDepth(-40).setScale(m.s).setAlpha(0);
-      vis.setAim(Math.atan2(h * 0.34 - m.y, cx - m.x)); // regarde vers le titre
+      const aim = Math.atan2(h * 0.34 - m.y, cx - m.x); // regarde vers le titre au départ
+      vis.setAim(aim);
+      this.mascots.push({ vis, aim });
       this.tweens.add({ targets: vis.container, alpha: 1, duration: 700, delay: 250 });
       this.tweens.add({ targets: vis.container, y: m.y - 16, duration: 1600 + Math.random() * 700, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+    }
+  }
+
+  /** Les yeux suivent le pointeur (souris), ou le doigt (tactile), sinon le titre. */
+  update(): void {
+    if (this.mascots.length === 0) return;
+    const p = this.input.activePointer;
+    const follow = this.usingMouse || p.isDown;
+    const tx = follow ? p.x : this.idleX;
+    const ty = follow ? p.y : this.idleY;
+    for (const m of this.mascots) {
+      const target = Phaser.Math.Angle.Between(m.vis.container.x, m.vis.container.y, tx, ty);
+      m.aim = Phaser.Math.Angle.RotateTo(m.aim, target, 0.12);
+      m.vis.setAim(m.aim);
     }
   }
 

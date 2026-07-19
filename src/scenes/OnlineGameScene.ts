@@ -11,6 +11,7 @@ import { stepMovement } from '../shared/game/movement';
 import { clamp, dist } from '../core/geometry';
 import { makeButton, type Button } from '../ui/widgets';
 import { safeInsets } from '../ui/layout';
+import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { drawCartoonPitch } from '../render/pitchRender';
 import { drawChainBolt } from '../render/fx';
@@ -73,7 +74,8 @@ export class OnlineGameScene extends Phaser.Scene {
   private overlayButtons: Button[] = [];
   private lobbyInfo?: Phaser.GameObjects.Text;
   private lobbyList?: Phaser.GameObjects.Text;
-  private boardText?: Phaser.GameObjects.Text; // leaderboard cumulatif (lobby + fin)
+  private endBoard?: LeaderboardTable; // tableau de classement (écran de fin)
+  private specBoard?: LeaderboardTable; // tableau de classement (mode spectateur)
 
   // Spectateur (Battle Royale) après élimination
   private spectateId: string | null = null;
@@ -408,7 +410,8 @@ export class OnlineGameScene extends Phaser.Scene {
     this.overlayObjs = [];
     this.lobbyInfo = undefined;
     this.lobbyList = undefined;
-    this.boardText = undefined;
+    this.endBoard?.destroy();
+    this.endBoard = undefined;
   }
 
   private buildOverlay(phase: string): void {
@@ -449,23 +452,37 @@ export class OnlineGameScene extends Phaser.Scene {
           : `Survivant : ${this.snap?.players.find((p) => p.t === winner)?.n ?? '—'}`
         : `${TEAM.labelA}  ${this.snap?.score[0] ?? 0} — ${this.snap?.score[1] ?? 0}  ${TEAM.labelB}`;
       const cy = h * 0.42;
-      add(this.add.rectangle(cx, cy, 560, 360, 0x120f28, 0.94).setStrokeStyle(3, 0x6a4dff).setScrollFactor(0).setDepth(D));
-      add(this.add.text(cx, cy - 154, title, { fontFamily: 'system-ui, sans-serif', fontSize: '38px', fontStyle: 'bold', color }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
-      add(this.add.text(cx, cy - 116, sub, { fontFamily: 'system-ui, sans-serif', fontSize: '19px', color: '#d8d8ff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
-      add(this.add.text(cx, cy - 86, '🏆 CLASSEMENT DE LA SESSION', { fontFamily: 'system-ui, sans-serif', fontSize: '15px', fontStyle: 'bold', color: '#ffcf33' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
-      this.boardText = add(this.add.text(cx, cy - 62, '', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#e8e8ff', align: 'left', lineSpacing: 5 }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(D + 1));
-      this.overlayButtons.push(this.uiButton(cx - 130, cy + 142, 220, 56, 'REVANCHE', 0x2f8f5a, () => this.room.send('rematch')));
-      this.overlayButtons.push(this.uiButton(cx + 130, cy + 142, 220, 56, 'QUITTER', 0x3a3466, () => this.leave()));
+      add(this.add.text(cx, cy - 150, title, { fontFamily: 'system-ui, sans-serif', fontSize: '36px', fontStyle: 'bold', color }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+      add(this.add.text(cx, cy - 114, sub, { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#d8d8ff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+      this.endBoard = new LeaderboardTable(this, cx, cy - 92, 380, 5, 34, D + 2);
+      this.overlayButtons.push(this.uiButton(cx - 130, cy + 178, 220, 56, 'REVANCHE', 0x2f8f5a, () => this.room.send('rematch')));
+      this.overlayButtons.push(this.uiButton(cx + 130, cy + 178, 220, 56, 'QUITTER', 0x3a3466, () => this.leave()));
     }
   }
 
-  /** Formatte le leaderboard cumulatif (rang, icône humain/bot, nom, score). */
-  private formatBoard(board: { n: string; s: number; b: boolean }[] | undefined, myName?: string): string {
-    if (!board || !board.length) return '(pas encore de score)';
-    return board
-      .slice(0, 6)
-      .map((e, i) => `${i + 1}.  ${e.b ? '🤖' : '👤'}  ${e.n}${!e.b && myName && e.n === myName ? ' (toi)' : ''}  —  ${e.s}`)
-      .join('\n');
+  /**
+   * Lignes du classement : le board cumulatif du serveur FUSIONNÉ avec les
+   * combattants de la manche en cours. Ainsi, dès la 1re partie, les survivants
+   * (encore sans points) apparaissent quand même — on voit le top bouger en
+   * direct pendant qu'on spectate, au lieu de n'afficher que les éliminés.
+   */
+  private boardRows(snap: MatchSnapshot): BoardRow[] {
+    const byKey = new Map<string, BoardRow>();
+    for (const e of snap.board ?? []) byKey.set(`${e.b ? 1 : 0}:${e.n}`, { n: e.n, s: e.s, b: e.b });
+    for (const p of snap.players) {
+      const k = `${p.bot ? 1 : 0}:${p.n}`;
+      if (!byKey.has(k)) byKey.set(k, { n: p.n, s: 0, b: p.bot });
+    }
+    return [...byKey.values()].sort((a, b) => b.s - a.s || (a.b === b.b ? a.n.localeCompare(b.n) : a.b ? 1 : -1));
+  }
+
+  /** Statut « vivant / éliminé » d'une entrée du classement dans la manche en cours. */
+  private boardStatus(snap: MatchSnapshot): (name: string, isBot: boolean) => 'alive' | 'dead' | null {
+    return (name, isBot) => {
+      if (snap.phase !== 'playing') return null;
+      const p = snap.players.find((q) => q.n === name && q.bot === isBot);
+      return p ? (p.al ? 'alive' : 'dead') : null;
+    };
   }
 
   private uiButton(x: number, y: number, w: number, h: number, label: string, color: number, onClick: () => void): Button {
@@ -487,7 +504,7 @@ export class OnlineGameScene extends Phaser.Scene {
         this.lobbyList.setText(humans.length ? line : '(en attente de joueurs)');
       }
     }
-    if (this.boardText) this.boardText.setText(this.formatBoard(snap.board, me?.n));
+    if (this.endBoard) this.endBoard.setData(this.boardRows(snap), me?.n, this.boardStatus(snap));
   }
 
   // ---------- Spectateur (Battle Royale) ----------
@@ -509,6 +526,8 @@ export class OnlineGameScene extends Phaser.Scene {
     if (!target) return null;
     if (!this.spectateBanner) this.buildSpectateUI();
     this.spectateBanner!.setText(`👁 Éliminé — tu observes ${target.n}`).setVisible(true);
+    // Classement en direct pendant qu'on spectate (statut 🟢/💀 qui bouge).
+    this.specBoard?.setData(this.boardRows(snap), me!.n, this.boardStatus(snap));
     return { x: target.x, y: target.y };
   }
 
@@ -517,6 +536,9 @@ export class OnlineGameScene extends Phaser.Scene {
     const by = this.scale.height * 0.16;
     this.spectateBanner = this.add.text(cx, by - 30, '', { fontFamily: 'system-ui, sans-serif', fontSize: '20px', color: '#ffcf33', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
     this.spectateBtn = this.uiButton(cx, by + 18, 210, 48, 'Observer le suivant ›', 0x6a4dff, () => this.cycleSpectate());
+    const i = safeInsets();
+    const bw = 300;
+    this.specBoard = new LeaderboardTable(this, this.scale.width - bw / 2 - 20 - i.right, 60 + i.top, bw, 4, 30, 1004);
   }
 
   private cycleSpectate(): void {
@@ -530,6 +552,8 @@ export class OnlineGameScene extends Phaser.Scene {
     this.spectateBanner = undefined;
     this.spectateBtn?.destroy();
     this.spectateBtn = undefined;
+    this.specBoard?.destroy();
+    this.specBoard = undefined;
   }
 
   // ---------- Divers ----------

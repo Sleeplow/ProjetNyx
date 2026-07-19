@@ -36056,9 +36056,11 @@ var MatchSim = class {
             this.portals.update(dtMs);
             this.simulate(dtMs, dtSec);
             this.applyNeuroDamage(dtSec);
+            this.reapDead();
           } else {
             this.simulate(dtMs, dtSec);
             this.updateZone(dtMs, dtSec);
+            this.reapDead();
           }
           this.updateCubes();
           this.checkSurvivors();
@@ -36176,6 +36178,15 @@ var MatchSim = class {
     this.updateHazards(dtSec, dtMs);
     for (const c of this.combatants) if (c.alive) c.tickPoison(dtMs);
     for (const c of this.combatants) if (c.alive) c.regenerate(dtMs);
+    this.reapDead();
+  }
+  /**
+   * Traite les morts en attente (score BR, réapparition foot). Appelé en fin de
+   * `simulate`, mais AUSSI après la neurotoxine : un joueur tué par le gaz doit
+   * passer par `handleDeath` (points + `brDeaths`) AVANT `checkSurvivors`,
+   * sinon la manche peut se terminer en oubliant de le classer.
+   */
+  reapDead() {
     for (const c of this.combatants) {
       if (c.alive) continue;
       if (this.isBR) {

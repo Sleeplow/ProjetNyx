@@ -39,18 +39,48 @@ Après une modification du code serveur, régénérer le bundle avant de committ
 npm run build:server
 ```
 
-## Exposer le serveur sur Internet
+## Hébergement durable (recommandé) : adresse fixe `wss://game.sleeplow.ca`
 
-- **Réseau local** : builder le client avec l'IP locale de la machine
-  (`VITE_NYXT_SERVER="ws://192.168.x.y:2567" npm run build`), ou entrer l'adresse
-  dans le lobby (« Serveur »).
-- **Internet** : un tunnel donne une URL publique **wss://** sans toucher à la
-  box. Sur un vieux macOS où cloudflared plante, un **tunnel SSH** fonctionne
-  (aucun binaire) :
-  ```bash
-  ssh -o StrictHostKeyChecking=no -R 80:localhost:2567 nokey@localhost.run
-  ```
-  Il affiche une URL `https://xxxx.lhr.life` → à passer au client en `wss://…`.
+Le client vise par défaut **`wss://game.sleeplow.ca`** une fois déployé (voir
+`src/net/config.ts`). L'idée : une petite machine toujours allumée fait tourner
+le serveur, et le sous-domaine `game.sleeplow.ca` (géré dans la zone DNS du
+domaine) pointe dessus. Plus d'URL au hasard.
+
+### Machine : Oracle Cloud Always Free (Ubuntu, région Montréal)
+
+1. **Compte Oracle Cloud** — au moment de l'inscription, choisir la région
+   d'origine **Canada Southeast (Montreal)** (elle ne se change plus après).
+2. **Créer une instance** Compute → Ubuntu 22.04, forme *Always Free*
+   (`VM.Standard.E2.1.Micro` ou `A1.Flex`), avec IP publique + clé SSH.
+3. **Security List** de la machine : ouvrir en entrée **TCP 80 et 443**
+   (`0.0.0.0/0`).
+4. **DNS** (WHC) : ajouter un enregistrement **A** `game` → l'IP publique de la
+   machine (même endroit que le `nyxt` vers GitHub Pages).
+5. **Installer le serveur** (en SSH sur la machine) :
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/Sleeplow/ProjetNyx/qa/server/deploy/setup-oracle.sh -o setup.sh
+   sudo bash setup.sh
+   ```
+   Le script (`server/deploy/setup-oracle.sh`) installe Node + Caddy, ouvre le
+   pare-feu interne, télécharge le bundle, crée un service qui redémarre tout
+   seul, et **obtient le certificat HTTPS automatiquement** pour le domaine.
+
+Ensuite le jeu se connecte à `wss://game.sleeplow.ca` sans rien à configurer.
+Mettre le serveur à jour = relancer `sudo bash setup.sh`.
+
+## Tunnel (dépannage / test rapide seulement)
+
+Pour tester vite sans machine dédiée, un tunnel donne une URL publique **wss://**
+temporaire. Sur un vieux macOS où cloudflared plante, un **tunnel SSH** marche
+(aucun binaire) :
+```bash
+ssh -o StrictHostKeyChecking=no -R 80:localhost:2567 nokey@localhost.run
+```
+Il affiche `https://xxxx.lhr.life` → à passer au client en `?server=wss://xxxx.lhr.life`.
+⚠️ L'URL **change à chaque reconnexion** — c'est pourquoi l'hébergement durable
+ci-dessus est préférable.
+
+Sur le réseau local : entrer `ws://192.168.x.y:2567` dans le lobby (« Serveur »).
 
 ## Ce que fait le serveur
 

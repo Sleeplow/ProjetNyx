@@ -2,8 +2,8 @@ import Phaser from 'phaser';
 import { MODES, type GameModeDef } from '../modes/registry';
 import { makeButton, nightBackground } from '../ui/widgets';
 
-/** Modes jouables EN LIGNE pour l'instant (le Battle Royale en ligne viendra ensuite). */
-const ONLINE_MODE_IDS = ['brawl-ball'];
+/** Modes jouables EN LIGNE. */
+const ONLINE_MODE_IDS = ['brawl-ball', 'battle-royale'];
 
 /** Sélecteur de mode de jeu (roulette). Commun au solo et à l'en ligne. */
 export class ModeSelectScene extends Phaser.Scene {

@@ -2,10 +2,13 @@ import type { InputState, ZarekDef } from '../../core/types';
 import { emptyInput } from '../../core/types';
 import { PITCH_NYXT } from '../../maps/pitchNyxt';
 import { BALL, SOCCER } from '../../config/soccer';
-import { COLORS, REGEN } from '../../config/constants';
+import { COLORS, REGEN, ZONE, POWER_CUBE } from '../../config/constants';
 import { ZAREKS, ZAREK_BY_ID, getZarek } from '../../zareks/registry';
 import { SoccerBot, type SoccerWorld } from '../../ai/SoccerBot';
+import { BattleBot, type BattleWorld } from '../../ai/BattleBot';
 import { clamp, dist, normalize, resolveCircleRect, circleHitsRect, pointInRect } from '../../core/geometry';
+
+export type OnlineMode = 'brawl-ball' | 'battle-royale';
 import { resolveChain } from './chain';
 import type { MatchPhase, MatchSnapshot, FxEvent, SnapPlayer } from './snapshot';
 
@@ -17,6 +20,23 @@ const MAP = PITCH_NYXT.map;
 const W = MAP.width;
 const H = MAP.height;
 const OBS = MAP.obstacles;
+
+// Battle Royale en ligne (chacun pour soi).
+const BR_PLAYERS = 6;
+const BR_MATCH_MS = 180000; // filet de sécurité ; le dernier survivant termine avant
+const ZONE_CENTER = { x: W / 2, y: H / 2 };
+const ZONE_INIT = Math.hypot(W / 2, H / 2) + 60; // couvre l'arène au départ
+const ZONE_MIN = 240;
+const BR_SHRINK_MS = 78000; // durée de rétrécissement après le délai initial
+
+/** Cube de power-up au sol (Battle Royale), pur. */
+class SimCube {
+  alive = true;
+  constructor(
+    public x: number,
+    public y: number,
+  ) {}
+}
 
 /** Combattant de simulation (pur, sans Phaser). Satisfait aussi `BotView`. */
 class SimCombatant {
@@ -34,6 +54,10 @@ class SimCombatant {
   poisonMs = 0;
   poisonDps = 0;
   respawnMs = 0;
+  /** Cubes de power-up ramassés (Battle Royale ; 0 au foot). */
+  cubes = 0;
+  /** Éliminé définitivement (Battle Royale : pas de réapparition). */
+  eliminated = false;
 
   constructor(
     public id: string,
@@ -49,10 +73,17 @@ class SimCombatant {
   }
 
   get maxHealth(): number {
-    return this.def.maxHealth;
+    return Math.round(this.def.maxHealth * (1 + POWER_CUBE.bonusPerCube * this.cubes));
   }
   get damageMult(): number {
-    return 1;
+    return 1 + POWER_CUBE.bonusPerCube * this.cubes;
+  }
+  /** Ramasse un cube : +PV max / +dégâts, petit soin partiel (le reste via régén). */
+  pickCube(): void {
+    const beforeMax = this.maxHealth;
+    this.cubes += 1;
+    const gained = this.maxHealth - beforeMax;
+    this.health = Math.min(this.maxHealth, this.health + gained * 0.35);
   }
   get speed(): number {
     return this.def.moveSpeed * (this.slowTimer > 0 ? this.slowFactor : 1);
@@ -288,12 +319,29 @@ function spawnsFor(team: number) {
  */
 export class MatchSim {
   private combatants: SimCombatant[] = [];
-  private bots = new Map<string, SoccerBot>();
+  private bots = new Map<string, SoccerBot | BattleBot>();
   private inputs = new Map<string, InputState>();
   private ball = new SimBall(PITCH_NYXT.ballStart.x, PITCH_NYXT.ballStart.y);
   private projectiles: SimProjectile[] = [];
   private hazards: SimHazard[] = [];
   private botSeq = 0;
+
+  // Battle Royale
+  private teamSeq = 0; // équipe unique par joueur en FFA
+  private cubesArr: SimCube[] = [];
+  private zoneRadius = ZONE_INIT;
+  private zoneElapsed = 0;
+
+  constructor(private mode: OnlineMode = 'brawl-ball') {}
+
+  private get isBR(): boolean {
+    return this.mode === 'battle-royale';
+  }
+
+  private brSpawn(i: number, n: number): { x: number; y: number } {
+    const a = (i / Math.max(1, n)) * Math.PI * 2 - Math.PI / 2;
+    return { x: ZONE_CENTER.x + Math.cos(a) * W * 0.34, y: ZONE_CENTER.y + Math.sin(a) * H * 0.32 };
+  }
 
   phase: MatchPhase = 'lobby';
   private timer = LOBBY_MS;
@@ -323,6 +371,32 @@ export class MatchSim {
   addPlayer(id: string, name: string, zarekId: string, preferredTeam: number): void {
     const zid = ZAREK_BY_ID[zarekId] ? zarekId : ZAREKS[0].id;
     const def = getZarek(zid);
+
+    if (this.isBR) {
+      if (this.phase === 'lobby') {
+        const sp = this.brSpawn(this.combatants.length, BR_PLAYERS);
+        this.combatants.push(new SimCombatant(id, name, this.teamSeq++, zid, def, false, sp.x, sp.y));
+        return;
+      }
+      // En cours : prendre la place d'un bot (garde son équipe unique).
+      const b = this.combatants.find((c) => c.isBot);
+      if (!b) return;
+      this.bots.delete(b.id);
+      this.inputs.delete(b.id);
+      b.id = id;
+      b.name = name;
+      b.zarekId = zid;
+      b.def = def;
+      b.isBot = false;
+      b.cubes = 0;
+      b.alive = true;
+      b.eliminated = false;
+      b.respawnMs = 0;
+      b.ultCharge = 0;
+      b.health = b.maxHealth;
+      return;
+    }
+
     const team = this.pickTeam(preferredTeam);
 
     if (this.phase === 'lobby') {
@@ -358,13 +432,20 @@ export class MatchSim {
       return;
     }
 
-    // En cours de partie : la place devient un bot (pour rester 3v3).
-    if (this.ball.carrierId === c.id) this.ball.drop(PITCH_NYXT.centerX - c.x, PITCH_NYXT.centerY - c.y);
+    // En cours de partie : la place devient un bot (pour garder l'effectif).
     const botId = `bot${this.botSeq++}`;
-    this.reassignId(c, botId);
-    c.isBot = true;
-    c.name = 'Bot';
-    this.bots.set(botId, new SoccerBot(spawnsFor(c.team)[0].role));
+    if (this.isBR) {
+      c.id = botId;
+      c.isBot = true;
+      c.name = 'Bot';
+      this.bots.set(botId, new BattleBot());
+    } else {
+      if (this.ball.carrierId === c.id) this.ball.drop(PITCH_NYXT.centerX - c.x, PITCH_NYXT.centerY - c.y);
+      this.reassignId(c, botId);
+      c.isBot = true;
+      c.name = 'Bot';
+      this.bots.set(botId, new SoccerBot(spawnsFor(c.team)[0].role));
+    }
     if (this.humanCount() === 0) this.resetToLobby();
   }
 
@@ -376,6 +457,7 @@ export class MatchSim {
   }
 
   chooseTeam(id: string, team: number): void {
+    if (this.isBR) return; // pas d'équipes en Battle Royale (chacun pour soi)
     if (this.phase !== 'lobby') return;
     const c = this.combatants.find((k) => k.id === id && !k.isBot);
     if (!c || c.team === team) return;
@@ -409,6 +491,15 @@ export class MatchSim {
     this.ball.vy = 0;
     this.ball.x = PITCH_NYXT.ballStart.x;
     this.ball.y = PITCH_NYXT.ballStart.y;
+    this.cubesArr = [];
+    this.zoneRadius = ZONE_INIT;
+    this.zoneElapsed = 0;
+    for (const c of this.combatants) {
+      c.cubes = 0;
+      c.eliminated = false;
+      c.alive = true;
+      c.respawnMs = 0;
+    }
     this.score = [0, 0];
     this.sudden = false;
     this.winner = -1;
@@ -417,6 +508,10 @@ export class MatchSim {
   }
 
   private startMatch(): void {
+    if (this.isBR) {
+      this.startMatchBR();
+      return;
+    }
     // Compléter chaque équipe à 3 avec des bots.
     for (const team of [0, 1]) {
       let members = this.combatants.filter((c) => c.team === team).length;
@@ -437,6 +532,92 @@ export class MatchSim {
     this.resetPositions(true);
     this.phase = 'countdown';
     this.timer = KICKOFF_MS;
+  }
+
+  /** Démarrage d'une Battle Royale : complète à 6 avec des bots, place en cercle,
+   *  sème les cubes, arme la zone. */
+  private startMatchBR(): void {
+    while (this.combatants.length < BR_PLAYERS) {
+      const def = ZAREKS[Math.floor(Math.random() * ZAREKS.length)];
+      const id = `bot${this.botSeq++}`;
+      this.combatants.push(new SimCombatant(id, 'Bot', this.teamSeq++, def.id, def, true, 0, 0));
+      this.bots.set(id, new BattleBot());
+    }
+    const n = this.combatants.length;
+    this.combatants.forEach((c, i) => {
+      const sp = this.brSpawn(i, n);
+      c.cubes = 0;
+      c.placeAt(sp.x, sp.y, true);
+      c.alive = true;
+      c.eliminated = false;
+      c.respawnMs = 0;
+      c.ultCharge = 0;
+    });
+    this.spawnCubes();
+    this.zoneRadius = ZONE_INIT;
+    this.zoneElapsed = 0;
+    this.winner = -1;
+    this.projectiles = [];
+    this.hazards = [];
+    this.phase = 'countdown';
+    this.timer = KICKOFF_MS;
+  }
+
+  private spawnCubes(): void {
+    this.cubesArr = [];
+    let placed = 0;
+    let tries = 0;
+    while (placed < POWER_CUBE.initialCount && tries < 300) {
+      tries++;
+      const x = 120 + Math.random() * (W - 240);
+      const y = 120 + Math.random() * (H - 240);
+      if (OBS.some((o) => circleHitsRect(x, y, POWER_CUBE.radius + 8, o))) continue;
+      this.cubesArr.push(new SimCube(x, y));
+      placed++;
+    }
+  }
+
+  private updateZone(dtMs: number, dtSec: number): void {
+    this.zoneElapsed += dtMs;
+    const t = clamp((this.zoneElapsed - ZONE.startDelayMs) / BR_SHRINK_MS, 0, 1);
+    this.zoneRadius = ZONE_INIT + (ZONE_MIN - ZONE_INIT) * t;
+    const dps = ZONE.baseDamagePerSecond + t * 18;
+    for (const c of this.combatants) {
+      if (!c.alive) continue;
+      if (dist(c.x, c.y, ZONE_CENTER.x, ZONE_CENTER.y) > this.zoneRadius) c.takeDamage(dps * dtSec);
+    }
+  }
+
+  private updateCubes(): void {
+    for (const cube of this.cubesArr) {
+      if (!cube.alive) continue;
+      for (const c of this.combatants) {
+        if (!c.alive) continue;
+        if (dist(c.x, c.y, cube.x, cube.y) <= POWER_CUBE.pickupRadius + c.def.radius) {
+          c.pickCube();
+          cube.alive = false;
+          break;
+        }
+      }
+    }
+  }
+
+  private battleWorld(): BattleWorld {
+    return {
+      all: this.combatants,
+      cubes: this.cubesArr,
+      zone: { x: ZONE_CENTER.x, y: ZONE_CENTER.y, r: this.zoneRadius },
+      obstacles: OBS,
+      width: W,
+      height: H,
+    };
+  }
+
+  /** Fin de BR dès qu'il ne reste qu'un survivant (ou personne = nul). */
+  private checkSurvivors(): void {
+    if (this.phase !== 'playing') return;
+    const alive = this.combatants.filter((c) => c.alive);
+    if (alive.length <= 1) this.endMatch(alive.length === 1 ? alive[0].team : -1);
   }
 
   private resetPositions(resetUlt: boolean): void {
@@ -491,7 +672,7 @@ export class MatchSim {
         this.timer -= dtMs;
         if (this.timer <= 0) {
           this.phase = 'playing';
-          this.matchClock = SOCCER.matchMs;
+          this.matchClock = this.isBR ? BR_MATCH_MS : SOCCER.matchMs;
         }
         break;
       case 'goal':
@@ -499,11 +680,23 @@ export class MatchSim {
         if (this.timer <= 0) this.resetForKickoff();
         break;
       case 'playing':
-        this.tickMatchClock(dtMs);
-        if (this.phase === 'playing') {
-          this.tickRespawns(dtMs);
+        if (this.isBR) {
+          this.matchClock -= dtMs;
           this.simulate(dtMs, dtSec);
-          this.updateBall(dtSec, dtMs);
+          this.updateZone(dtMs, dtSec);
+          this.updateCubes();
+          this.checkSurvivors();
+          if (this.phase === 'playing' && this.matchClock <= 0) {
+            const alive = this.combatants.filter((c) => c.alive);
+            this.endMatch(alive.length ? alive[0].team : -1);
+          }
+        } else {
+          this.tickMatchClock(dtMs);
+          if (this.phase === 'playing') {
+            this.tickRespawns(dtMs);
+            this.simulate(dtMs, dtSec);
+            this.updateBall(dtSec, dtMs);
+          }
         }
         break;
       case 'ended':
@@ -546,14 +739,19 @@ export class MatchSim {
   }
 
   private simulate(dtMs: number, dtSec: number): void {
-    const world = this.botWorld();
+    const world = this.isBR ? null : this.botWorld();
+    const bworld = this.isBR ? this.battleWorld() : null;
 
     // 1) Entrées.
     const inputs = new Map<string, InputState>();
     for (const c of this.combatants) {
       if (!c.alive) continue;
-      if (c.isBot) inputs.set(c.id, this.bots.get(c.id)!.update(c, world, dtMs));
-      else inputs.set(c.id, this.inputs.get(c.id) ?? emptyInput());
+      if (c.isBot) {
+        const bot = this.bots.get(c.id)!;
+        inputs.set(c.id, this.isBR ? (bot as BattleBot).update(c, bworld!, dtMs) : (bot as SoccerBot).update(c, world!, dtMs));
+      } else {
+        inputs.set(c.id, this.inputs.get(c.id) ?? emptyInput());
+      }
     }
 
     // 2) Déplacement (porteur ralenti + recul).
@@ -605,7 +803,12 @@ export class MatchSim {
     for (const c of this.combatants) if (c.alive) c.tickPoison(dtMs);
     for (const c of this.combatants) if (c.alive) c.regenerate(dtMs);
     for (const c of this.combatants) {
-      if (!c.alive && c.respawnMs <= 0) this.handleDeath(c);
+      if (c.alive) continue;
+      if (this.isBR) {
+        if (!c.eliminated) this.handleDeath(c);
+      } else if (c.respawnMs <= 0) {
+        this.handleDeath(c);
+      }
     }
   }
 
@@ -896,6 +1099,10 @@ export class MatchSim {
 
   private handleDeath(c: SimCombatant): void {
     this.fx.push({ k: 'death', x: c.x, y: c.y, c: c.def.color });
+    if (this.isBR) {
+      c.eliminated = true; // pas de réapparition en Battle Royale
+      return;
+    }
     if (this.ball.carrierId === c.id) this.ball.drop(PITCH_NYXT.centerX - c.x, PITCH_NYXT.centerY - c.y);
     c.respawnMs = SOCCER.respawnMs;
   }
@@ -918,8 +1125,9 @@ export class MatchSim {
       carry: this.ball.carrierId === c.id,
       bot: c.isBot,
       rs: Math.max(0, Math.round(c.respawnMs)),
+      cb: c.cubes,
     }));
-    return {
+    const snap: MatchSnapshot = {
       phase: this.phase,
       timer: Math.max(0, Math.round(this.phase === 'playing' ? this.matchClock : this.timer)),
       score: [this.score[0], this.score[1]],
@@ -930,6 +1138,13 @@ export class MatchSim {
       proj: this.projectiles.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y), r: p.radius, c: p.color })),
       haz: this.hazards.map((h) => ({ x: Math.round(h.x), y: Math.round(h.y), r: h.radius, c: h.color })),
       fx: this.fx,
+      mode: this.mode,
     };
+    if (this.isBR) {
+      snap.zone = { x: ZONE_CENTER.x, y: ZONE_CENTER.y, r: Math.round(this.zoneRadius) };
+      snap.cubes = this.cubesArr.filter((q) => q.alive).map((q) => ({ x: Math.round(q.x), y: Math.round(q.y), r: POWER_CUBE.radius, c: COLORS.powerCube }));
+      snap.alive = this.combatants.filter((c) => c.alive).length;
+    }
+    return snap;
   }
 }

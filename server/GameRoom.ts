@@ -1,6 +1,6 @@
 import { Room, type Client } from 'colyseus';
 import { Schema, defineTypes } from '@colyseus/schema';
-import { MatchSim } from '../src/shared/game/MatchSim';
+import { MatchSim, type OnlineMode } from '../src/shared/game/MatchSim';
 import { emptyInput, type InputState } from '../src/core/types';
 
 const TICK_MS = 1000 / 30; // 30 pas/seconde d'autorité serveur
@@ -15,6 +15,7 @@ interface JoinOptions {
   name?: string;
   zarek?: string;
   team?: number;
+  mode?: string;
 }
 
 /**
@@ -23,11 +24,16 @@ interface JoinOptions {
  * complet à chaque tick. L'id du salon sert de « code » à partager.
  */
 export class GameRoom extends Room<RoomInfo> {
-  maxClients = 6; // 6 humains max (3v3) ; les places vides sont des bots
-  private sim = new MatchSim();
+  maxClients = 6; // 6 humains max ; les places vides sont des bots (3v3 ou BR à 6)
+  private sim!: MatchSim;
 
-  onCreate(): void {
-    this.setState(new RoomInfo());
+  onCreate(options?: JoinOptions): void {
+    const mode: OnlineMode = options?.mode === 'battle-royale' ? 'battle-royale' : 'brawl-ball';
+    this.sim = new MatchSim(mode);
+    const info = new RoomInfo();
+    info.mode = mode;
+    this.setState(info);
+    this.setMetadata({ mode });
 
     this.onMessage('input', (client, message: InputState) => this.sim.setInput(client.sessionId, sanitize(message)));
     this.onMessage('team', (client, message: number) => this.sim.chooseTeam(client.sessionId, message === 1 ? 1 : 0));

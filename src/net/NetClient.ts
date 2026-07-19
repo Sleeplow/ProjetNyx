@@ -6,6 +6,8 @@ export interface JoinOptions {
   name: string;
   zarek: string;
   team?: number;
+  /** Mode ('brawl-ball' | 'battle-royale') — sert au filtrage du match rapide. */
+  mode?: string;
 }
 
 /**

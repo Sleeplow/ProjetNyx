@@ -20,6 +20,7 @@ export interface SnapPlayer {
   carry: boolean; // porte la balle
   bot: boolean;
   rs: number; // ms avant réapparition (0 si vivant)
+  cb?: number; // cubes de power-up ramassés (Battle Royale)
 }
 
 export interface SnapEntity {
@@ -46,10 +47,18 @@ export interface MatchSnapshot {
   timer: number; // ms pertinents à la phase (compte à rebours / horloge de match)
   score: [number, number];
   sudden: boolean;
-  winner: number; // -1 sauf en 'ended'
+  winner: number; // -1 sauf en 'ended' (en BR : équipe/id du survivant)
   players: SnapPlayer[];
   ball: { x: number; y: number; carrier: string | null };
   proj: SnapEntity[];
   haz: SnapEntity[];
   fx: FxEvent[];
+  /** Mode de jeu (le client adapte le rendu). Absent = 'brawl-ball' (rétro-compat). */
+  mode?: 'brawl-ball' | 'battle-royale';
+  /** (Battle Royale) Zone sûre qui rétrécit. */
+  zone?: { x: number; y: number; r: number };
+  /** (Battle Royale) Cubes de power-up au sol. */
+  cubes?: SnapEntity[];
+  /** (Battle Royale) Nombre de survivants. */
+  alive?: number;
 }

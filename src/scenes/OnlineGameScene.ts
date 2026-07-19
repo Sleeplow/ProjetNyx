@@ -36,10 +36,14 @@ export class OnlineGameScene extends Phaser.Scene {
   private controller!: PlayerController;
   private snap: MatchSnapshot | null = null;
 
+  private mode = 'brawl-ball';
   private avatars = new Map<string, Avatar>();
   private ballGfx!: Phaser.GameObjects.Container;
   private projGfx!: Phaser.GameObjects.Graphics;
   private hazGfx!: Phaser.GameObjects.Graphics;
+  private zoneGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) zone qui rétrécit
+  private cubeGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) cubes de power-up
+  private dangerVignette!: Phaser.GameObjects.Rectangle; // (Battle Royale) hors zone
   private localStub = { x: PITCH_NYXT.centerX, y: PITCH_NYXT.centerY, def: zdef(ZAREKS[0].id) };
   private predX = PITCH_NYXT.centerX;
   private predY = PITCH_NYXT.centerY;
@@ -65,13 +69,14 @@ export class OnlineGameScene extends Phaser.Scene {
     super('OnlineGame');
   }
 
-  create(data: { room?: Room; zarekId?: string }): void {
+  create(data: { room?: Room; zarekId?: string; modeId?: string }): void {
     if (!data?.room) {
       this.scene.start('OnlineMenu');
       return;
     }
     this.room = data.room;
     this.zarekId = data.zarekId ?? ZAREKS[0].id;
+    this.mode = data.modeId ?? 'brawl-ball';
     this.localStub.def = zdef(this.zarekId);
     this.snap = null;
     this.avatars = new Map();
@@ -81,9 +86,13 @@ export class OnlineGameScene extends Phaser.Scene {
     this.cameras.main.setZoom(1);
     this.drawPitch();
 
+    this.zoneGfx = this.add.graphics().setDepth(1);
+    this.cubeGfx = this.add.graphics().setDepth(12);
     this.hazGfx = this.add.graphics().setDepth(11);
     this.ballGfx = this.makeBall();
+    if (this.mode === 'battle-royale') this.ballGfx.setVisible(false);
     this.projGfx = this.add.graphics().setDepth(18);
+    this.dangerVignette = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0xff2a2a, 0).setScrollFactor(0).setDepth(800);
 
     this.controller = new PlayerController(this);
     this.buildHud();
@@ -171,6 +180,7 @@ export class OnlineGameScene extends Phaser.Scene {
       av.vis.setAim(p.a);
       av.vis.setHealth(p.hm > 0 ? p.h / p.hm : 0);
       av.vis.setUltReady(p.uc >= 100);
+      av.vis.setCubes(p.cb ?? 0);
     }
     for (const [id, av] of this.avatars) {
       if (!seen.has(id)) {
@@ -179,9 +189,15 @@ export class OnlineGameScene extends Phaser.Scene {
       }
     }
 
-    // 3) Balle, projectiles, zones.
-    this.ballGfx.x = Phaser.Math.Linear(this.ballGfx.x, snap.ball.x, 0.5);
-    this.ballGfx.y = Phaser.Math.Linear(this.ballGfx.y, snap.ball.y, 0.5);
+    // 3) Balle (foot) OU zone + cubes (BR), puis projectiles + zones d'effet.
+    if (this.mode === 'battle-royale') {
+      this.renderZone(snap);
+      this.renderCubes(snap);
+      this.updateDanger(snap, me);
+    } else {
+      this.ballGfx.x = Phaser.Math.Linear(this.ballGfx.x, snap.ball.x, 0.5);
+      this.ballGfx.y = Phaser.Math.Linear(this.ballGfx.y, snap.ball.y, 0.5);
+    }
     this.projGfx.clear();
     for (const p of snap.proj) {
       this.projGfx.fillStyle(p.c, 1).fillCircle(p.x, p.y, p.r);
@@ -213,7 +229,8 @@ export class OnlineGameScene extends Phaser.Scene {
   // ---------- Rendu ----------
 
   private spawnAvatar(p: SnapPlayer, isSelf: boolean): Avatar {
-    const teamColor = p.t === 0 ? TEAM.colorA : TEAM.colorB;
+    // FFA (Battle Royale) : anneau rouge « ennemi » pour tous les autres.
+    const teamColor = this.mode === 'battle-royale' ? 0xff6b5e : p.t === 0 ? TEAM.colorA : TEAM.colorB;
     const vis = createAvatarVisual(this, zdef(p.z), { isSelf, teamColor, label: isSelf ? `${p.n} (toi)` : p.n });
     vis.container.setPosition(p.x, p.y).setDepth(isSelf ? 20 : 15);
     vis.popIn();
@@ -309,7 +326,8 @@ export class OnlineGameScene extends Phaser.Scene {
   }
 
   private updateHud(snap: MatchSnapshot, me?: SnapPlayer): void {
-    this.scoreText.setText(`${TEAM.labelA}  ${snap.score[0]} — ${snap.score[1]}  ${TEAM.labelB}`);
+    if (this.mode === 'battle-royale') this.scoreText.setText(`🏆 Survivants : ${snap.alive ?? snap.players.filter((p) => p.al).length}`);
+    else this.scoreText.setText(`${TEAM.labelA}  ${snap.score[0]} — ${snap.score[1]}  ${TEAM.labelB}`);
 
     if (snap.phase === 'playing') {
       if (snap.sudden) this.timerText.setText('MORT SUBITE').setColor('#ffcf33');
@@ -332,7 +350,8 @@ export class OnlineGameScene extends Phaser.Scene {
     } else if (snap.phase === 'goal') {
       this.bigText.setText('BUT !').setColor('#ffffff').setVisible(true);
     } else if (snap.phase === 'playing' && me && !me.al) {
-      this.bigText.setText(`Réapparition dans ${Math.ceil(me.rs / 1000)}…`).setColor('#ff6b5e').setVisible(true);
+      if (this.mode === 'battle-royale') this.bigText.setText('ÉLIMINÉ').setColor('#ff6b5e').setVisible(true);
+      else this.bigText.setText(`Réapparition dans ${Math.ceil(me.rs / 1000)}…`).setColor('#ff6b5e').setVisible(true);
     } else {
       this.bigText.setVisible(false);
     }
@@ -361,14 +380,20 @@ export class OnlineGameScene extends Phaser.Scene {
     };
 
     if (phase === 'lobby') {
-      add(this.add.rectangle(cx, h * 0.42, 520, 300, 0x120f28, 0.92).setStrokeStyle(3, 0x2f8f5a).setScrollFactor(0).setDepth(D));
-      add(this.add.text(cx, h * 0.42 - 120, 'SALLE D’ATTENTE', { fontFamily: 'system-ui, sans-serif', fontSize: '28px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
-      this.lobbyInfo = add(this.add.text(cx, h * 0.42 - 82, '', { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#ffcf33' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
-      add(this.add.text(cx, h * 0.42 - 48, 'Ton équipe :', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#d8d8ff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
-      this.overlayButtons.push(this.uiButton(cx - 90, h * 0.42 - 12, 150, 46, 'BLEU', 0x2f6fd8, () => this.room.send('team', 0)));
-      this.overlayButtons.push(this.uiButton(cx + 90, h * 0.42 - 12, 150, 46, 'ROUGE', 0xc0392b, () => this.room.send('team', 1)));
-      this.lobbyList = add(this.add.text(cx, h * 0.42 + 26, '', { fontFamily: 'system-ui, sans-serif', fontSize: '15px', color: '#cfcfe6', align: 'center', lineSpacing: 3 }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(D + 1));
-      this.overlayButtons.push(this.uiButton(cx, h * 0.42 + 118, 260, 56, 'DÉMARRER', 0x2f8f5a, () => this.room.send('start')));
+      const isBR = this.mode === 'battle-royale';
+      const py = h * 0.42;
+      add(this.add.rectangle(cx, py, 520, 300, 0x120f28, 0.92).setStrokeStyle(3, 0x2f8f5a).setScrollFactor(0).setDepth(D));
+      add(this.add.text(cx, py - 120, 'SALLE D’ATTENTE', { fontFamily: 'system-ui, sans-serif', fontSize: '28px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+      this.lobbyInfo = add(this.add.text(cx, py - 82, '', { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#ffcf33' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+      if (isBR) {
+        add(this.add.text(cx, py - 44, 'Chacun pour soi — dernier survivant gagne', { fontFamily: 'system-ui, sans-serif', fontSize: '15px', color: '#d8d8ff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+      } else {
+        add(this.add.text(cx, py - 48, 'Ton équipe :', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#d8d8ff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+        this.overlayButtons.push(this.uiButton(cx - 90, py - 12, 150, 46, 'BLEU', 0x2f6fd8, () => this.room.send('team', 0)));
+        this.overlayButtons.push(this.uiButton(cx + 90, py - 12, 150, 46, 'ROUGE', 0xc0392b, () => this.room.send('team', 1)));
+      }
+      this.lobbyList = add(this.add.text(cx, isBR ? py - 12 : py + 26, '', { fontFamily: 'system-ui, sans-serif', fontSize: '15px', color: '#cfcfe6', align: 'center', lineSpacing: 3, wordWrap: { width: 480 } }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(D + 1));
+      this.overlayButtons.push(this.uiButton(cx, py + 118, 260, 56, 'DÉMARRER', 0x2f8f5a, () => this.room.send('start')));
     } else if (phase === 'ended') {
       add(this.add.rectangle(cx, h * 0.42, 520, 260, 0x120f28, 0.94).setStrokeStyle(3, 0x6a4dff).setScrollFactor(0).setDepth(D));
       const me = this.snap?.players.find((p) => p.i === this.room.sessionId);
@@ -376,8 +401,14 @@ export class OnlineGameScene extends Phaser.Scene {
       const myTeam = me?.t ?? 0;
       const title = winner < 0 ? 'ÉGALITÉ' : winner === myTeam ? 'VICTOIRE !' : 'DÉFAITE';
       const color = winner < 0 ? '#d8d8ff' : winner === myTeam ? '#ffcf33' : '#ff6b5e';
+      const sub =
+        this.mode === 'battle-royale'
+          ? winner < 0
+            ? 'Personne n’a survécu'
+            : `Survivant : ${this.snap?.players.find((p) => p.t === winner)?.n ?? '—'}`
+          : `${TEAM.labelA}  ${this.snap?.score[0] ?? 0} — ${this.snap?.score[1] ?? 0}  ${TEAM.labelB}`;
       add(this.add.text(cx, h * 0.42 - 78, title, { fontFamily: 'system-ui, sans-serif', fontSize: '44px', fontStyle: 'bold', color }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
-      add(this.add.text(cx, h * 0.42 - 22, `${TEAM.labelA}  ${this.snap?.score[0] ?? 0} — ${this.snap?.score[1] ?? 0}  ${TEAM.labelB}`, { fontFamily: 'system-ui, sans-serif', fontSize: '24px', color: '#d8d8ff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+      add(this.add.text(cx, h * 0.42 - 22, sub, { fontFamily: 'system-ui, sans-serif', fontSize: '22px', color: '#d8d8ff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
       this.overlayButtons.push(this.uiButton(cx - 130, h * 0.42 + 60, 220, 58, 'REVANCHE', 0x2f8f5a, () => this.room.send('rematch')));
       this.overlayButtons.push(this.uiButton(cx + 130, h * 0.42 + 60, 220, 58, 'QUITTER', 0x3a3466, () => this.leave()));
     }
@@ -397,7 +428,8 @@ export class OnlineGameScene extends Phaser.Scene {
       if (this.lobbyInfo) this.lobbyInfo.setText(`Départ auto dans ${Math.ceil(snap.timer / 1000)} s  ·  places vides = bots`);
       if (this.lobbyList) {
         const humans = snap.players.filter((p) => !p.bot);
-        const line = humans.map((p) => `${p.t === 0 ? '🔵' : '🔴'} ${p.n}${p.i === me?.i ? ' (toi)' : ''}`).join('   ');
+        const marker = (p: SnapPlayer) => (this.mode === 'battle-royale' ? '👤' : p.t === 0 ? '🔵' : '🔴');
+        const line = humans.map((p) => `${marker(p)} ${p.n}${p.i === me?.i ? ' (toi)' : ''}`).join('   ');
         this.lobbyList.setText(humans.length ? line : '(en attente de joueurs)');
       }
     }
@@ -412,10 +444,45 @@ export class OnlineGameScene extends Phaser.Scene {
       /* déjà déconnecté */
     }
     if (message) console.warn(message);
-    this.scene.start('OnlineMenu', { zarekId: this.zarekId, modeId: 'brawl-ball' });
+    this.scene.start('OnlineMenu', { zarekId: this.zarekId, modeId: this.mode });
   }
 
   private drawPitch(): void {
-    drawCartoonPitch(this, PITCH_NYXT);
+    drawCartoonPitch(this, PITCH_NYXT, { soccer: this.mode !== 'battle-royale' });
+  }
+
+  /** (Battle Royale) Zone sûre : halo léger + anneau vif à la limite. */
+  private renderZone(snap: MatchSnapshot): void {
+    this.zoneGfx.clear();
+    const z = snap.zone;
+    if (!z) return;
+    this.zoneGfx.fillStyle(0x9b4dff, 0.04).fillCircle(z.x, z.y, z.r);
+    this.zoneGfx.lineStyle(10, 0x9b4dff, 0.35).strokeCircle(z.x, z.y, z.r);
+    this.zoneGfx.lineStyle(5, 0xc9a3ff, 0.95).strokeCircle(z.x, z.y, z.r);
+  }
+
+  /** (Battle Royale) Cubes de power-up en losanges. */
+  private renderCubes(snap: MatchSnapshot): void {
+    this.cubeGfx.clear();
+    for (const q of snap.cubes ?? []) {
+      const r = q.r + 2;
+      this.cubeGfx.fillStyle(q.c, 1);
+      this.cubeGfx.lineStyle(2, 0xffffff, 0.85);
+      this.cubeGfx.beginPath();
+      this.cubeGfx.moveTo(q.x, q.y - r);
+      this.cubeGfx.lineTo(q.x + r, q.y);
+      this.cubeGfx.lineTo(q.x, q.y + r);
+      this.cubeGfx.lineTo(q.x - r, q.y);
+      this.cubeGfx.closePath();
+      this.cubeGfx.fillPath();
+      this.cubeGfx.strokePath();
+    }
+  }
+
+  /** (Battle Royale) Voile rouge quand le joueur local est hors de la zone. */
+  private updateDanger(snap: MatchSnapshot, me?: SnapPlayer): void {
+    const z = snap.zone;
+    const outside = !!z && !!me && me.al && snap.phase === 'playing' && Math.hypot(this.predX - z.x, this.predY - z.y) > z.r;
+    this.dangerVignette.alpha = Phaser.Math.Linear(this.dangerVignette.alpha, outside ? 0.28 : 0, 0.15);
   }
 }

@@ -16,7 +16,8 @@ const gameServer = new Server({
 });
 
 // « nyxt » : le type de salon (create / joinById / joinOrCreate côté client).
-gameServer.define('nyxt', GameRoom);
+// filterBy(mode) : le match rapide ne mélange jamais Brawl Ball et Battle Royale.
+gameServer.define('nyxt', GameRoom).filterBy(['mode']);
 
 gameServer
   .listen(port)

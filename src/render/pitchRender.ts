@@ -26,10 +26,12 @@ function drawCartoonGoal(scene: Phaser.Scene, zone: Rect, color: number): void {
 }
 
 /**
- * Dessine la pelouse « cartoon » (bandes tondues + marquages blancs épais + buts
- * + haies). Utilisé par le foot solo ET en ligne, pour un rendu identique.
+ * Dessine la pelouse « cartoon » (bandes tondues + haies). Avec `soccer` (défaut),
+ * ajoute les marquages de foot + les buts. Sans (Battle Royale en ligne), c'est
+ * une arène neutre : juste la touche + les haies.
  */
-export function drawCartoonPitch(scene: Phaser.Scene, pitch: PitchDef): void {
+export function drawCartoonPitch(scene: Phaser.Scene, pitch: PitchDef, opts?: { soccer?: boolean }): void {
+  const soccer = opts?.soccer ?? true;
   const { width, height } = pitch.map;
   const cx = width / 2;
   const cy = height / 2;
@@ -45,19 +47,19 @@ export function drawCartoonPitch(scene: Phaser.Scene, pitch: PitchDef): void {
   const inset = 60;
   const lines = scene.add.graphics().setDepth(2);
   lines.lineStyle(6, LINE, 0.9);
-  lines.strokeRect(inset, inset, width - inset * 2, height - inset * 2); // touche
-  lines.lineBetween(cx, inset, cx, height - inset); // ligne médiane
-  lines.strokeCircle(cx, cy, 160); // rond central
-  lines.fillStyle(LINE, 0.9);
-  lines.fillCircle(cx, cy, 10); // point central
-  const boxW = 210;
-  const boxH = 440;
-  lines.strokeRect(inset, cy - boxH / 2, boxW, boxH);
-  lines.strokeRect(width - inset - boxW, cy - boxH / 2, boxW, boxH);
-
-  // Buts teintés équipe (gauche = équipe 0, droite = équipe 1).
-  drawCartoonGoal(scene, pitch.leftGoal.zone, TEAM.colorA);
-  drawCartoonGoal(scene, pitch.rightGoal.zone, TEAM.colorB);
+  lines.strokeRect(inset, inset, width - inset * 2, height - inset * 2); // touche (les deux modes)
+  if (soccer) {
+    lines.lineBetween(cx, inset, cx, height - inset); // ligne médiane
+    lines.strokeCircle(cx, cy, 160); // rond central
+    lines.fillStyle(LINE, 0.9);
+    lines.fillCircle(cx, cy, 10); // point central
+    const boxW = 210;
+    const boxH = 440;
+    lines.strokeRect(inset, cy - boxH / 2, boxW, boxH);
+    lines.strokeRect(width - inset - boxW, cy - boxH / 2, boxW, boxH);
+    drawCartoonGoal(scene, pitch.leftGoal.zone, TEAM.colorA);
+    drawCartoonGoal(scene, pitch.rightGoal.zone, TEAM.colorB);
+  }
 
   // Murs + blocs de couverture (les murs sont inclus dans map.obstacles).
   for (const o of pitch.map.obstacles) drawCartoonBlock(scene, o);

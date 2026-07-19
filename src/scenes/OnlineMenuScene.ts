@@ -22,6 +22,10 @@ export class OnlineMenuScene extends Phaser.Scene {
   }
 
   create(): void {
+    // La scène est réutilisée : on repart d'un état propre (sinon `busy` peut
+    // rester bloqué après un match et « Match rapide » ne répond plus).
+    this.busy = false;
+    this.net = new NetClient();
     nightBackground(this);
     const w = this.scale.width;
     const cx = w / 2;

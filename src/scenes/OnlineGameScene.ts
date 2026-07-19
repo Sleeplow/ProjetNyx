@@ -9,6 +9,7 @@ import type { ZarekDef } from '../core/types';
 import { stepMovement } from '../shared/game/movement';
 import { clamp, dist } from '../core/geometry';
 import { makeButton, type Button } from '../ui/widgets';
+import { safeInsets } from '../ui/layout';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { drawCartoonPitch } from '../render/pitchRender';
 import { drawChainBolt } from '../render/fx';
@@ -44,6 +45,7 @@ export class OnlineGameScene extends Phaser.Scene {
   private zoneGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) zone qui rétrécit
   private cubeGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) cubes de power-up
   private dangerVignette!: Phaser.GameObjects.Rectangle; // (Battle Royale) hors zone
+  private quitText!: Phaser.GameObjects.Text;
   private localStub = { x: PITCH_NYXT.centerX, y: PITCH_NYXT.centerY, def: zdef(ZAREKS[0].id) };
   private predX = PITCH_NYXT.centerX;
   private predY = PITCH_NYXT.centerY;
@@ -314,7 +316,7 @@ export class OnlineGameScene extends Phaser.Scene {
     this.add.rectangle(0, 0, 260, 11, COLORS.healthBack, 0.85).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d).setName('ultback').setStrokeStyle(2, 0x000000, 0.6);
     this.ultFill = this.add.rectangle(0, 0, 0, 11, COLORS.ultReady).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d);
     this.bigText = this.add.text(0, 0, '', { fontFamily: 'system-ui, sans-serif', fontSize: '52px', fontStyle: 'bold', color: '#ffffff', align: 'center' }).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
-    this.add.text(20, 16, '‹ Quitter', { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#d8d8ff', fontStyle: 'bold' }).setScrollFactor(0).setDepth(1005).setInteractive({ useHandCursor: true }).on('pointerup', () => this.leave());
+    this.quitText = this.add.text(0, 0, '‹ Quitter', { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#d8d8ff', fontStyle: 'bold' }).setScrollFactor(0).setDepth(1005).setInteractive({ useHandCursor: true }).on('pointerup', () => this.leave());
     this.layoutHud();
     this.scale.on('resize', this.layoutHud, this);
   }
@@ -322,10 +324,14 @@ export class OnlineGameScene extends Phaser.Scene {
   private layoutHud(): void {
     const w = this.scale.width;
     const h = this.scale.height;
-    this.scoreText.setPosition(w / 2, 12);
-    this.timerText.setPosition(w / 2, 50);
-    const hx = 24;
-    const hy = h - 52;
+    const i = safeInsets();
+    // Voile « hors zone » : couvre tout l'écran (recalé à chaque resize).
+    this.dangerVignette.setPosition(w / 2, h / 2).setSize(w, h);
+    this.scoreText.setPosition(w / 2, 12 + i.top);
+    this.timerText.setPosition(w / 2, 50 + i.top);
+    this.quitText.setPosition(20 + i.left, 16 + i.top);
+    const hx = 24 + i.left;
+    const hy = h - 52 - i.bottom;
     (this.children.getByName('hpback') as Phaser.GameObjects.Rectangle)?.setPosition(hx, hy);
     this.hpFill.setPosition(hx, hy);
     this.hpText.setPosition(hx + 8, hy);

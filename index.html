@@ -39,10 +39,53 @@
         width: 100%;
         height: 100%;
       }
+      /* Nyxt se joue en PAYSAGE : sur un appareil tactile tenu en portrait, on
+         invite à tourner l'écran (couvre tout, le jeu reste actif derrière). */
+      #rotate {
+        display: none;
+      }
+      @media (orientation: portrait) and (pointer: coarse) {
+        #rotate {
+          display: flex;
+          position: fixed;
+          inset: 0;
+          z-index: 9999;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          background: #0b0b1a;
+          color: #f2f2ff;
+          padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        }
+      }
+      #rotate .phone {
+        font-size: 68px;
+        line-height: 1;
+        animation: nyxt-rot 2s ease-in-out infinite;
+      }
+      #rotate p {
+        font-size: 22px;
+        font-weight: 800;
+        margin: 18px 0 6px;
+      }
+      #rotate span {
+        font-size: 15px;
+        color: #9b8cff;
+      }
+      @keyframes nyxt-rot {
+        0%, 40% { transform: rotate(0deg); }
+        60%, 100% { transform: rotate(-90deg); }
+      }
     </style>
   </head>
   <body>
     <div id="game"></div>
+    <div id="rotate" aria-hidden="true">
+      <div class="phone">📱</div>
+      <p>Tourne ton téléphone</p>
+      <span>Nyxt se joue en mode paysage</span>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

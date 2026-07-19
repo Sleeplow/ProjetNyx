@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import type { Combatant } from '../core/Combatant';
 import { COLORS } from '../config/constants';
+import { safeInsets } from './layout';
 
 /** Interface tête haute (HUD), fixée à la caméra. */
 export class Hud {
@@ -51,17 +52,18 @@ export class Hud {
   private layout(): void {
     const w = this.scene.scale.width;
     const h = this.scene.scale.height;
+    const i = safeInsets();
     this.vignette.setSize(w, h);
-    const hx = 24;
-    const hy = h - 54;
+    const hx = 24 + i.left;
+    const hy = h - 54 - i.bottom;
     this.hpBack.setPosition(hx, hy);
     this.hpFill.setPosition(hx, hy);
     this.hpText.setPosition(hx + 8, hy);
     this.ultBack.setPosition(hx, hy + 22);
     this.ultFill.setPosition(hx, hy + 22);
-    this.survivors.setPosition(w - 20, 16);
-    this.cubes.setPosition(20, 16);
-    this.warning.setPosition(w / 2, 24);
+    this.survivors.setPosition(w - 20 - i.right, 16 + i.top);
+    this.cubes.setPosition(20 + i.left, 16 + i.top);
+    this.warning.setPosition(w / 2, 24 + i.top);
     this.announce.setPosition(w / 2, h / 2 - 40);
   }
 

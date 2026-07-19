@@ -65,6 +65,12 @@ export class OnlineGameScene extends Phaser.Scene {
   private lobbyInfo?: Phaser.GameObjects.Text;
   private lobbyList?: Phaser.GameObjects.Text;
 
+  // Spectateur (Battle Royale) après élimination
+  private spectateId: string | null = null;
+  private spectateAliveIds: string[] = [];
+  private spectateBanner?: Phaser.GameObjects.Text;
+  private spectateBtn?: Button;
+
   constructor() {
     super('OnlineGame');
   }
@@ -80,6 +86,7 @@ export class OnlineGameScene extends Phaser.Scene {
     this.localStub.def = zdef(this.zarekId);
     this.snap = null;
     this.avatars = new Map();
+    this.spectateId = null;
 
     const { width, height } = PITCH_NYXT.map;
     this.cameras.main.setBounds(0, 0, width, height);
@@ -113,6 +120,7 @@ export class OnlineGameScene extends Phaser.Scene {
     this.events.once('shutdown', () => {
       this.controller.destroy();
       this.destroyOverlay();
+      this.teardownSpectate();
     });
   }
 
@@ -209,11 +217,12 @@ export class OnlineGameScene extends Phaser.Scene {
       this.hazGfx.lineStyle(3, h.c, 0.7).strokeCircle(h.x, h.y, h.r);
     }
 
-    // 4) Caméra sur le joueur local (prédit).
-    const fx = me ? this.predX : PITCH_NYXT.centerX;
-    const fy = me ? this.predY : PITCH_NYXT.centerY;
-    this.camX = Phaser.Math.Linear(this.camX, fx, 0.12);
-    this.camY = Phaser.Math.Linear(this.camY, fy, 0.12);
+    // 4) Caméra : joueur local prédit, ou survivant observé (spectateur BR).
+    const spec = this.updateSpectator(snap, me);
+    const fx = spec ? spec.x : me ? this.predX : PITCH_NYXT.centerX;
+    const fy = spec ? spec.y : me ? this.predY : PITCH_NYXT.centerY;
+    this.camX = Phaser.Math.Linear(this.camX, fx, spec ? 0.14 : 0.12);
+    this.camY = Phaser.Math.Linear(this.camY, fy, spec ? 0.14 : 0.12);
     this.cameras.main.centerOn(this.camX, this.camY);
 
     // 5) HUD + overlays.
@@ -350,7 +359,8 @@ export class OnlineGameScene extends Phaser.Scene {
     } else if (snap.phase === 'goal') {
       this.bigText.setText('BUT !').setColor('#ffffff').setVisible(true);
     } else if (snap.phase === 'playing' && me && !me.al) {
-      if (this.mode === 'battle-royale') this.bigText.setText('ÉLIMINÉ').setColor('#ff6b5e').setVisible(true);
+      // En BR, le bandeau spectateur affiche l'état ; on masque le grand texte central.
+      if (this.mode === 'battle-royale') this.bigText.setVisible(false);
       else this.bigText.setText(`Réapparition dans ${Math.ceil(me.rs / 1000)}…`).setColor('#ff6b5e').setVisible(true);
     } else {
       this.bigText.setVisible(false);
@@ -433,6 +443,48 @@ export class OnlineGameScene extends Phaser.Scene {
         this.lobbyList.setText(humans.length ? line : '(en attente de joueurs)');
       }
     }
+  }
+
+  // ---------- Spectateur (Battle Royale) ----------
+
+  /** Si le joueur est éliminé en BR, suit un survivant ; renvoie sa position à observer. */
+  private updateSpectator(snap: MatchSnapshot, me?: SnapPlayer): { x: number; y: number } | null {
+    const spectating = this.mode === 'battle-royale' && !!me && !me.al && snap.phase === 'playing';
+    if (!spectating) {
+      this.teardownSpectate();
+      return null;
+    }
+    this.spectateAliveIds = snap.players.filter((p) => p.al && p.i !== me!.i).map((p) => p.i);
+    if (this.spectateAliveIds.length === 0) {
+      this.teardownSpectate();
+      return null;
+    }
+    if (!this.spectateId || !this.spectateAliveIds.includes(this.spectateId)) this.spectateId = this.spectateAliveIds[0];
+    const target = snap.players.find((p) => p.i === this.spectateId);
+    if (!target) return null;
+    if (!this.spectateBanner) this.buildSpectateUI();
+    this.spectateBanner!.setText(`👁 Éliminé — tu observes ${target.n}`).setVisible(true);
+    return { x: target.x, y: target.y };
+  }
+
+  private buildSpectateUI(): void {
+    const cx = this.scale.width / 2;
+    const by = this.scale.height * 0.16;
+    this.spectateBanner = this.add.text(cx, by - 30, '', { fontFamily: 'system-ui, sans-serif', fontSize: '20px', color: '#ffcf33', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
+    this.spectateBtn = this.uiButton(cx, by + 18, 210, 48, 'Observer le suivant ›', 0x6a4dff, () => this.cycleSpectate());
+  }
+
+  private cycleSpectate(): void {
+    if (this.spectateAliveIds.length === 0) return;
+    const i = this.spectateAliveIds.indexOf(this.spectateId ?? '');
+    this.spectateId = this.spectateAliveIds[(i + 1) % this.spectateAliveIds.length];
+  }
+
+  private teardownSpectate(): void {
+    this.spectateBanner?.destroy();
+    this.spectateBanner = undefined;
+    this.spectateBtn?.destroy();
+    this.spectateBtn = undefined;
   }
 
   // ---------- Divers ----------

@@ -36,8 +36,9 @@ export class OnlineMenuScene extends Phaser.Scene {
     const cx = w / 2;
     const h = this.scale.height;
 
+    const sub = this.modeId === 'battle-royale' ? 'Battle Royale · dernier survivant, jusqu’à 6 joueurs' : 'Brawl Ball 3v3 · joue avec tes amis ou au hasard';
     this.add.text(cx, 70, 'EN LIGNE', { fontFamily: 'system-ui, sans-serif', fontSize: '44px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-    this.add.text(cx, 116, 'Brawl Ball 3v3 · joue avec tes amis ou au hasard', { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#9b8cff' }).setOrigin(0.5);
+    this.add.text(cx, 116, sub, { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#9b8cff' }).setOrigin(0.5);
 
     this.add.text(cx, h * 0.24, 'Ton pseudo', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#d8d8ff' }).setOrigin(0.5);
     this.nameInput = this.makeInput('Pseudo', 16, localStorage.getItem('nyxt.pseudo') ?? '');
@@ -81,7 +82,7 @@ export class OnlineMenuScene extends Phaser.Scene {
   }
 
   private opts(): JoinOptions {
-    return { name: this.playerName(), zarek: this.zarekId };
+    return { name: this.playerName(), zarek: this.zarekId, mode: this.modeId };
   }
 
   /** Lance une connexion, gère l'attente et les erreurs, puis entre en partie. */
@@ -92,7 +93,7 @@ export class OnlineMenuScene extends Phaser.Scene {
     try {
       const room = await connect();
       this.setStatus('Connecté !', '#46d160');
-      this.scene.start('OnlineGame', { room, zarekId: this.zarekId });
+      this.scene.start('OnlineGame', { room, zarekId: this.zarekId, modeId: this.modeId });
     } catch (err) {
       this.busy = false;
       const msg = err instanceof Error ? err.message : String(err);

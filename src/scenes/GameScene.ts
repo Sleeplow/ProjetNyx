@@ -9,6 +9,7 @@ import { BattleRoyaleMode } from '../modes/battleRoyale';
 import { BotController, type BotWorld } from '../ai/BotController';
 import { PlayerController } from '../input/PlayerController';
 import { Hud } from '../ui/Hud';
+import { makeButton, type Button } from '../ui/widgets';
 import { ARENA_ROYALE } from '../maps/arenaRoyale';
 import { resolveChain } from '../shared/game/chain';
 import { drawChainBolt } from '../render/fx';
@@ -44,6 +45,12 @@ export class GameScene extends Phaser.Scene {
   private camX = 0;
   private camY = 0;
 
+  // Mode spectateur (une fois éliminé) : on suit un survivant, on passe au suivant.
+  private spectating = false;
+  private spectateTargetId: string | null = null;
+  private spectateBanner?: Phaser.GameObjects.Text;
+  private spectateButtons: Button[] = [];
+
   constructor() {
     super('Game');
   }
@@ -60,6 +67,10 @@ export class GameScene extends Phaser.Scene {
     this.handledDead = new Set();
     this.ending = false;
     this.placement = PLAYERS_PER_MATCH;
+    this.spectating = false;
+    this.spectateTargetId = null;
+    this.spectateBanner = undefined;
+    this.spectateButtons = [];
 
     const { width, height } = this.map;
     this.cameras.main.setBounds(0, 0, width, height);
@@ -88,6 +99,7 @@ export class GameScene extends Phaser.Scene {
       this.playerController.destroy();
       this.hud.destroy();
       this.mode.destroy();
+      for (const b of this.spectateButtons) b.destroy();
     });
   }
 
@@ -295,16 +307,31 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 9) Rendu des combattants (furtivité : un ennemi caché n'est visible que de près).
+    // 9) Rendu des combattants (furtivité : un ennemi caché n'est visible que de
+    //    près). En spectateur, on montre le corps du joueur mort en moins et on
+    //    révèle tout le monde (le spectateur voit tout).
     for (const c of this.combatants) {
-      if (!(c.alive || c.isPlayer)) continue;
-      const revealed = c.isPlayer || !c.inBush || dist(c.x, c.y, this.player.x, this.player.y) <= BUSH.revealRange;
+      if (!c.alive && !(c.isPlayer && !this.spectating)) continue;
+      const revealed = this.spectating || c.isPlayer || !c.inBush || dist(c.x, c.y, this.player.x, this.player.y) <= BUSH.revealRange;
       c.syncDisplay(revealed);
     }
+    if (this.spectating) this.player.hide();
 
-    // 10) Caméra (suivi lissé du joueur).
-    this.camX = Phaser.Math.Linear(this.camX, this.player.x, 0.1);
-    this.camY = Phaser.Math.Linear(this.camY, this.player.y, 0.1);
+    // 10) Caméra : suit le joueur, ou le survivant observé en mode spectateur.
+    let camTarget: { x: number; y: number } = this.player;
+    if (this.spectating) {
+      let t = this.combatants.find((c) => c.id === this.spectateTargetId && c.alive);
+      if (!t) {
+        this.advanceSpectate();
+        t = this.combatants.find((c) => c.id === this.spectateTargetId && c.alive);
+      }
+      if (t) {
+        camTarget = t;
+        this.spectateBanner?.setText(`👁 Tu observes ${t.def.name}`);
+      }
+    }
+    this.camX = Phaser.Math.Linear(this.camX, camTarget.x, 0.1);
+    this.camY = Phaser.Math.Linear(this.camY, camTarget.y, 0.1);
     this.cameras.main.centerOn(this.camX, this.camY);
 
     // 11) HUD.
@@ -639,17 +666,54 @@ export class GameScene extends Phaser.Scene {
 
   private checkEnd(): void {
     const alive = this.combatants.filter((c) => c.alive);
-    if (!this.player.alive) {
-      this.endGame(false);
-    } else if (alive.length === 1 && alive[0] === this.player) {
-      this.placement = 1;
-      this.endGame(true);
+    if (this.player.alive) {
+      if (alive.length === 1) {
+        this.placement = 1;
+        this.endGame(true);
+      }
+      return;
     }
+    // Joueur éliminé : on passe en mode spectateur et la partie continue jusqu'à
+    // ce qu'il ne reste qu'un survivant (ou que le joueur quitte lui-même).
+    if (!this.spectating) this.enterSpectate(alive.length);
+    if (alive.length <= 1) this.endGame(false);
+  }
+
+  /** Entre en mode spectateur après élimination : suit un survivant, boutons pour changer/quitter. */
+  private enterSpectate(othersAlive: number): void {
+    this.spectating = true;
+    this.placement = othersAlive + 1;
+    this.hud.flash('ÉLIMINÉ — mode spectateur', '#ff6b5e');
+    this.spectateTargetId = this.combatants.find((c) => c.alive)?.id ?? null;
+
+    const w = this.scale.width;
+    const cx = w / 2;
+    const by = this.scale.height * 0.16;
+    this.spectateBanner = this.add
+      .text(cx, by - 30, '', { fontFamily: 'system-ui, sans-serif', fontSize: '20px', color: '#ffcf33', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(1002);
+    this.spectateButtons.push(makeButton(this, cx + 95, by + 18, 170, 48, 'Suivant ›', () => this.advanceSpectate()));
+    this.spectateButtons.push(makeButton(this, cx - 95, by + 18, 170, 48, 'Quitter', () => this.endGame(false), 0x3a3466));
+    for (const b of this.spectateButtons) b.setScrollFactor(0);
+  }
+
+  /** Passe au survivant suivant (ou revient au premier). */
+  private advanceSpectate(): void {
+    const ids = this.combatants.filter((c) => c.alive).map((c) => c.id);
+    if (ids.length === 0) return;
+    const i = ids.indexOf(this.spectateTargetId ?? '');
+    this.spectateTargetId = ids[(i + 1) % ids.length];
   }
 
   private endGame(victory: boolean): void {
+    if (this.ending) return;
     this.ending = true;
-    this.hud.flash(victory ? 'VICTOIRE ROYALE !' : 'ÉLIMINÉ', victory ? '#ffcf33' : '#ff6b5e');
+    for (const b of this.spectateButtons) b.destroy();
+    this.spectateButtons = [];
+    this.spectateBanner?.destroy();
+    this.hud.flash(victory ? 'VICTOIRE ROYALE !' : 'FIN DE LA PARTIE', victory ? '#ffcf33' : '#d8d8ff');
     this.time.delayedCall(1500, () => {
       this.scene.start('GameOver', { victory, mode: 'battle-royale', modeId: this.modeId, placement: this.placement, zarekId: this.selectedZarekId });
     });

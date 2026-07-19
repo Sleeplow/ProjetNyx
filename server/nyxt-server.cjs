@@ -34608,6 +34608,33 @@ var COLORS = {
   textLight: 15921919,
   white: 16777215
 };
+var ZONE = {
+  /** Délai avant le premier rétrécissement (ms). */
+  startDelayMs: 8e3,
+  /** Durée d'un palier de rétrécissement (ms). */
+  shrinkStepMs: 12e3,
+  /** Temps de pause entre deux rétrécissements (ms). */
+  restBetweenMs: 5e3,
+  /** Rayon final de la zone (px) — la zone ne descend jamais en dessous. */
+  minRadius: 180,
+  /** Dégâts par seconde hors zone (augmente à chaque palier). */
+  baseDamagePerSecond: 6,
+  damagePerSecondPerStep: 4
+};
+var POWER_CUBE = {
+  /** Nombre de cubes dispersés au départ. */
+  initialCount: 10,
+  /** Bonus multiplicatif de PV max et de dégâts par cube (0.10 = +10%). */
+  bonusPerCube: 0.1,
+  /** Rayon de ramassage (px). */
+  pickupRadius: 26,
+  /** Rayon visuel du cube (px). */
+  radius: 12,
+  /** Un cube resté hors de la zone sûre disparaît après ce délai (ms). */
+  outsideDespawnMs: 5e3,
+  /** Délai avant que les cubes « en trop » d'un combattant mort réapparaissent au hasard (ms). */
+  respawnDelayMs: 5e3
+};
 var REGEN = {
   /** Délai sans tirer ni subir de dégâts avant que la régén démarre (ms). */
   delayMs: 1500,
@@ -34974,6 +35001,72 @@ var SoccerBot = class {
   }
 };
 
+// src/ai/BattleBot.ts
+function norm(x, y) {
+  const d = Math.hypot(x, y);
+  return d < 1e-4 ? { x: 0, y: 0 } : { x: x / d, y: y / d };
+}
+var BattleBot = class {
+  update(self, world, _dtMs) {
+    const inp = emptyInput();
+    inp.aimX = Math.cos(self.aimAngle);
+    inp.aimY = Math.sin(self.aimAngle);
+    let foe = null;
+    let fd = Infinity;
+    for (const o of world.all) {
+      if (!o.alive || o.id === self.id || o.team === self.team) continue;
+      const d = Math.hypot(o.x - self.x, o.y - self.y);
+      if (d < fd) {
+        fd = d;
+        foe = o;
+      }
+    }
+    const cx = world.zone.x;
+    const cy = world.zone.y;
+    const distZone = Math.hypot(self.x - cx, self.y - cy);
+    const outside = distZone > world.zone.r - 50;
+    const lowHp = self.healthRatio < 0.3;
+    const range = self.def.attack.range;
+    const move = (dx, dy) => {
+      const n = norm(dx, dy);
+      inp.moveX = n.x;
+      inp.moveY = n.y;
+    };
+    const shootAt = (t) => {
+      inp.aimX = t.x - self.x;
+      inp.aimY = t.y - self.y;
+      inp.attack = true;
+      inp.attackReleased = true;
+      if (self.ultReady) inp.ultimate = true;
+    };
+    if (outside) {
+      move(cx - self.x, cy - self.y);
+      if (foe && fd < range) shootAt(foe);
+    } else if (lowHp && foe) {
+      move(self.x - foe.x, self.y - foe.y);
+      if (fd < range) shootAt(foe);
+    } else if (foe) {
+      if (fd > range * 0.85) move(foe.x - self.x, foe.y - self.y);
+      else if (fd < range * 0.4) move(self.x - foe.x, self.y - foe.y);
+      if (fd < range) shootAt(foe);
+    } else {
+      let cube = null;
+      let cd = Infinity;
+      for (const q of world.cubes) {
+        if (!q.alive) continue;
+        const d = Math.hypot(q.x - self.x, q.y - self.y);
+        if (d < cd) {
+          cd = d;
+          cube = q;
+        }
+      }
+      if (cube) move(cube.x - self.x, cube.y - self.y);
+      else if (distZone > 80) move(cx - self.x, cy - self.y);
+    }
+    return inp;
+  }
+};
+
 // src/shared/game/chain.ts
 function resolveChain(sx, sy, nodes, firstRange, jumpRange, maxJumps) {
   const hits = [];
@@ -35011,6 +35104,19 @@ var MAP = PITCH_NYXT.map;
 var W2 = MAP.width;
 var H2 = MAP.height;
 var OBS = MAP.obstacles;
+var BR_PLAYERS = 6;
+var BR_MATCH_MS = 18e4;
+var ZONE_CENTER = { x: W2 / 2, y: H2 / 2 };
+var ZONE_INIT = Math.hypot(W2 / 2, H2 / 2) + 60;
+var ZONE_MIN = 240;
+var BR_SHRINK_MS = 78e3;
+var SimCube = class {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.alive = true;
+  }
+};
 var SimCombatant = class {
   constructor(id, name, team, zarekId, def, isBot, x, y) {
     this.id = id;
@@ -35034,13 +35140,24 @@ var SimCombatant = class {
     this.poisonMs = 0;
     this.poisonDps = 0;
     this.respawnMs = 0;
+    /** Cubes de power-up ramassés (Battle Royale ; 0 au foot). */
+    this.cubes = 0;
+    /** Éliminé définitivement (Battle Royale : pas de réapparition). */
+    this.eliminated = false;
     this.health = def.maxHealth;
   }
   get maxHealth() {
-    return this.def.maxHealth;
+    return Math.round(this.def.maxHealth * (1 + POWER_CUBE.bonusPerCube * this.cubes));
   }
   get damageMult() {
-    return 1;
+    return 1 + POWER_CUBE.bonusPerCube * this.cubes;
+  }
+  /** Ramasse un cube : +PV max / +dégâts, petit soin partiel (le reste via régén). */
+  pickCube() {
+    const beforeMax = this.maxHealth;
+    this.cubes += 1;
+    const gained = this.maxHealth - beforeMax;
+    this.health = Math.min(this.maxHealth, this.health + gained * 0.35);
   }
   get speed() {
     return this.def.moveSpeed * (this.slowTimer > 0 ? this.slowFactor : 1);
@@ -35256,7 +35373,8 @@ function spawnsFor(team) {
   return team === 0 ? PITCH_NYXT.spawnsTeam0 : PITCH_NYXT.spawnsTeam1;
 }
 var MatchSim = class {
-  constructor() {
+  constructor(mode = "brawl-ball") {
+    this.mode = mode;
     this.combatants = [];
     this.bots = /* @__PURE__ */ new Map();
     this.inputs = /* @__PURE__ */ new Map();
@@ -35264,6 +35382,12 @@ var MatchSim = class {
     this.projectiles = [];
     this.hazards = [];
     this.botSeq = 0;
+    // Battle Royale
+    this.teamSeq = 0;
+    // équipe unique par joueur en FFA
+    this.cubesArr = [];
+    this.zoneRadius = ZONE_INIT;
+    this.zoneElapsed = 0;
     this.phase = "lobby";
     this.timer = LOBBY_MS;
     this.matchClock = SOCCER.matchMs;
@@ -35271,6 +35395,13 @@ var MatchSim = class {
     this.winner = -1;
     this.score = [0, 0];
     this.fx = [];
+  }
+  get isBR() {
+    return this.mode === "battle-royale";
+  }
+  brSpawn(i, n) {
+    const a = i / Math.max(1, n) * Math.PI * 2 - Math.PI / 2;
+    return { x: ZONE_CENTER.x + Math.cos(a) * W2 * 0.34, y: ZONE_CENTER.y + Math.sin(a) * H2 * 0.32 };
   }
   // ---------- Joueurs (join / leave / équipe) ----------
   humanCount() {
@@ -35288,6 +35419,29 @@ var MatchSim = class {
   addPlayer(id, name, zarekId, preferredTeam) {
     const zid = ZAREK_BY_ID[zarekId] ? zarekId : ZAREKS[0].id;
     const def = getZarek(zid);
+    if (this.isBR) {
+      if (this.phase === "lobby") {
+        const sp = this.brSpawn(this.combatants.length, BR_PLAYERS);
+        this.combatants.push(new SimCombatant(id, name, this.teamSeq++, zid, def, false, sp.x, sp.y));
+        return;
+      }
+      const b = this.combatants.find((c) => c.isBot);
+      if (!b) return;
+      this.bots.delete(b.id);
+      this.inputs.delete(b.id);
+      b.id = id;
+      b.name = name;
+      b.zarekId = zid;
+      b.def = def;
+      b.isBot = false;
+      b.cubes = 0;
+      b.alive = true;
+      b.eliminated = false;
+      b.respawnMs = 0;
+      b.ultCharge = 0;
+      b.health = b.maxHealth;
+      return;
+    }
     const team = this.pickTeam(preferredTeam);
     if (this.phase === "lobby") {
       const sp = spawnsFor(team)[this.combatants.filter((c) => c.team === team).length % TEAM_SIZE];
@@ -35317,12 +35471,19 @@ var MatchSim = class {
       if (this.humanCount() === 0) this.resetToLobby();
       return;
     }
-    if (this.ball.carrierId === c.id) this.ball.drop(PITCH_NYXT.centerX - c.x, PITCH_NYXT.centerY - c.y);
     const botId = `bot${this.botSeq++}`;
-    this.reassignId(c, botId);
-    c.isBot = true;
-    c.name = "Bot";
-    this.bots.set(botId, new SoccerBot(spawnsFor(c.team)[0].role));
+    if (this.isBR) {
+      c.id = botId;
+      c.isBot = true;
+      c.name = "Bot";
+      this.bots.set(botId, new BattleBot());
+    } else {
+      if (this.ball.carrierId === c.id) this.ball.drop(PITCH_NYXT.centerX - c.x, PITCH_NYXT.centerY - c.y);
+      this.reassignId(c, botId);
+      c.isBot = true;
+      c.name = "Bot";
+      this.bots.set(botId, new SoccerBot(spawnsFor(c.team)[0].role));
+    }
     if (this.humanCount() === 0) this.resetToLobby();
   }
   /** Change l'id d'un combattant en gardant cohérentes les références de balle. */
@@ -35332,6 +35493,7 @@ var MatchSim = class {
     c.id = newId;
   }
   chooseTeam(id, team) {
+    if (this.isBR) return;
     if (this.phase !== "lobby") return;
     const c = this.combatants.find((k) => k.id === id && !k.isBot);
     if (!c || c.team === team) return;
@@ -35360,6 +35522,15 @@ var MatchSim = class {
     this.ball.vy = 0;
     this.ball.x = PITCH_NYXT.ballStart.x;
     this.ball.y = PITCH_NYXT.ballStart.y;
+    this.cubesArr = [];
+    this.zoneRadius = ZONE_INIT;
+    this.zoneElapsed = 0;
+    for (const c of this.combatants) {
+      c.cubes = 0;
+      c.eliminated = false;
+      c.alive = true;
+      c.respawnMs = 0;
+    }
     this.score = [0, 0];
     this.sudden = false;
     this.winner = -1;
@@ -35367,6 +35538,10 @@ var MatchSim = class {
     this.timer = LOBBY_MS;
   }
   startMatch() {
+    if (this.isBR) {
+      this.startMatchBR();
+      return;
+    }
     for (const team of [0, 1]) {
       let members = this.combatants.filter((c) => c.team === team).length;
       while (members < TEAM_SIZE) {
@@ -35386,6 +35561,86 @@ var MatchSim = class {
     this.resetPositions(true);
     this.phase = "countdown";
     this.timer = KICKOFF_MS;
+  }
+  /** Démarrage d'une Battle Royale : complète à 6 avec des bots, place en cercle,
+   *  sème les cubes, arme la zone. */
+  startMatchBR() {
+    while (this.combatants.length < BR_PLAYERS) {
+      const def = ZAREKS[Math.floor(Math.random() * ZAREKS.length)];
+      const id = `bot${this.botSeq++}`;
+      this.combatants.push(new SimCombatant(id, "Bot", this.teamSeq++, def.id, def, true, 0, 0));
+      this.bots.set(id, new BattleBot());
+    }
+    const n = this.combatants.length;
+    this.combatants.forEach((c, i) => {
+      const sp = this.brSpawn(i, n);
+      c.cubes = 0;
+      c.placeAt(sp.x, sp.y, true);
+      c.alive = true;
+      c.eliminated = false;
+      c.respawnMs = 0;
+      c.ultCharge = 0;
+    });
+    this.spawnCubes();
+    this.zoneRadius = ZONE_INIT;
+    this.zoneElapsed = 0;
+    this.winner = -1;
+    this.projectiles = [];
+    this.hazards = [];
+    this.phase = "countdown";
+    this.timer = KICKOFF_MS;
+  }
+  spawnCubes() {
+    this.cubesArr = [];
+    let placed = 0;
+    let tries = 0;
+    while (placed < POWER_CUBE.initialCount && tries < 300) {
+      tries++;
+      const x = 120 + Math.random() * (W2 - 240);
+      const y = 120 + Math.random() * (H2 - 240);
+      if (OBS.some((o) => circleHitsRect(x, y, POWER_CUBE.radius + 8, o))) continue;
+      this.cubesArr.push(new SimCube(x, y));
+      placed++;
+    }
+  }
+  updateZone(dtMs, dtSec) {
+    this.zoneElapsed += dtMs;
+    const t = clamp((this.zoneElapsed - ZONE.startDelayMs) / BR_SHRINK_MS, 0, 1);
+    this.zoneRadius = ZONE_INIT + (ZONE_MIN - ZONE_INIT) * t;
+    const dps = ZONE.baseDamagePerSecond + t * 18;
+    for (const c of this.combatants) {
+      if (!c.alive) continue;
+      if (dist(c.x, c.y, ZONE_CENTER.x, ZONE_CENTER.y) > this.zoneRadius) c.takeDamage(dps * dtSec);
+    }
+  }
+  updateCubes() {
+    for (const cube of this.cubesArr) {
+      if (!cube.alive) continue;
+      for (const c of this.combatants) {
+        if (!c.alive) continue;
+        if (dist(c.x, c.y, cube.x, cube.y) <= POWER_CUBE.pickupRadius + c.def.radius) {
+          c.pickCube();
+          cube.alive = false;
+          break;
+        }
+      }
+    }
+  }
+  battleWorld() {
+    return {
+      all: this.combatants,
+      cubes: this.cubesArr,
+      zone: { x: ZONE_CENTER.x, y: ZONE_CENTER.y, r: this.zoneRadius },
+      obstacles: OBS,
+      width: W2,
+      height: H2
+    };
+  }
+  /** Fin de BR dès qu'il ne reste qu'un survivant (ou personne = nul). */
+  checkSurvivors() {
+    if (this.phase !== "playing") return;
+    const alive = this.combatants.filter((c) => c.alive);
+    if (alive.length <= 1) this.endMatch(alive.length === 1 ? alive[0].team : -1);
   }
   resetPositions(resetUlt) {
     for (const team of [0, 1]) {
@@ -35434,7 +35689,7 @@ var MatchSim = class {
         this.timer -= dtMs;
         if (this.timer <= 0) {
           this.phase = "playing";
-          this.matchClock = SOCCER.matchMs;
+          this.matchClock = this.isBR ? BR_MATCH_MS : SOCCER.matchMs;
         }
         break;
       case "goal":
@@ -35442,11 +35697,23 @@ var MatchSim = class {
         if (this.timer <= 0) this.resetForKickoff();
         break;
       case "playing":
-        this.tickMatchClock(dtMs);
-        if (this.phase === "playing") {
-          this.tickRespawns(dtMs);
+        if (this.isBR) {
+          this.matchClock -= dtMs;
           this.simulate(dtMs, dtSec);
-          this.updateBall(dtSec, dtMs);
+          this.updateZone(dtMs, dtSec);
+          this.updateCubes();
+          this.checkSurvivors();
+          if (this.phase === "playing" && this.matchClock <= 0) {
+            const alive = this.combatants.filter((c) => c.alive);
+            this.endMatch(alive.length ? alive[0].team : -1);
+          }
+        } else {
+          this.tickMatchClock(dtMs);
+          if (this.phase === "playing") {
+            this.tickRespawns(dtMs);
+            this.simulate(dtMs, dtSec);
+            this.updateBall(dtSec, dtMs);
+          }
         }
         break;
       case "ended":
@@ -35485,12 +35752,17 @@ var MatchSim = class {
     };
   }
   simulate(dtMs, dtSec) {
-    const world = this.botWorld();
+    const world = this.isBR ? null : this.botWorld();
+    const bworld = this.isBR ? this.battleWorld() : null;
     const inputs = /* @__PURE__ */ new Map();
     for (const c of this.combatants) {
       if (!c.alive) continue;
-      if (c.isBot) inputs.set(c.id, this.bots.get(c.id).update(c, world, dtMs));
-      else inputs.set(c.id, this.inputs.get(c.id) ?? emptyInput());
+      if (c.isBot) {
+        const bot = this.bots.get(c.id);
+        inputs.set(c.id, this.isBR ? bot.update(c, bworld, dtMs) : bot.update(c, world, dtMs));
+      } else {
+        inputs.set(c.id, this.inputs.get(c.id) ?? emptyInput());
+      }
     }
     const kbDecay = Math.exp(-9 * dtSec);
     for (const c of this.combatants) {
@@ -35536,7 +35808,12 @@ var MatchSim = class {
     for (const c of this.combatants) if (c.alive) c.tickPoison(dtMs);
     for (const c of this.combatants) if (c.alive) c.regenerate(dtMs);
     for (const c of this.combatants) {
-      if (!c.alive && c.respawnMs <= 0) this.handleDeath(c);
+      if (c.alive) continue;
+      if (this.isBR) {
+        if (!c.eliminated) this.handleDeath(c);
+      } else if (c.respawnMs <= 0) {
+        this.handleDeath(c);
+      }
     }
   }
   separate() {
@@ -35807,6 +36084,10 @@ var MatchSim = class {
   }
   handleDeath(c) {
     this.fx.push({ k: "death", x: c.x, y: c.y, c: c.def.color });
+    if (this.isBR) {
+      c.eliminated = true;
+      return;
+    }
     if (this.ball.carrierId === c.id) this.ball.drop(PITCH_NYXT.centerX - c.x, PITCH_NYXT.centerY - c.y);
     c.respawnMs = SOCCER.respawnMs;
   }
@@ -35826,9 +36107,10 @@ var MatchSim = class {
       uc: Math.round(c.ultCharge),
       carry: this.ball.carrierId === c.id,
       bot: c.isBot,
-      rs: Math.max(0, Math.round(c.respawnMs))
+      rs: Math.max(0, Math.round(c.respawnMs)),
+      cb: c.cubes
     }));
-    return {
+    const snap = {
       phase: this.phase,
       timer: Math.max(0, Math.round(this.phase === "playing" ? this.matchClock : this.timer)),
       score: [this.score[0], this.score[1]],
@@ -35838,8 +36120,15 @@ var MatchSim = class {
       ball: { x: Math.round(this.ball.x), y: Math.round(this.ball.y), carrier: this.ball.carrierId },
       proj: this.projectiles.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y), r: p.radius, c: p.color })),
       haz: this.hazards.map((h) => ({ x: Math.round(h.x), y: Math.round(h.y), r: h.radius, c: h.color })),
-      fx: this.fx
+      fx: this.fx,
+      mode: this.mode
     };
+    if (this.isBR) {
+      snap.zone = { x: ZONE_CENTER.x, y: ZONE_CENTER.y, r: Math.round(this.zoneRadius) };
+      snap.cubes = this.cubesArr.filter((q) => q.alive).map((q) => ({ x: Math.round(q.x), y: Math.round(q.y), r: POWER_CUBE.radius, c: COLORS.powerCube }));
+      snap.alive = this.combatants.filter((c) => c.alive).length;
+    }
+    return snap;
   }
 };
 
@@ -35856,11 +36145,14 @@ var GameRoom = class extends Room {
   constructor() {
     super(...arguments);
     this.maxClients = 6;
-    // 6 humains max (3v3) ; les places vides sont des bots
-    this.sim = new MatchSim();
   }
-  onCreate() {
-    this.setState(new RoomInfo());
+  onCreate(options) {
+    const mode = options?.mode === "battle-royale" ? "battle-royale" : "brawl-ball";
+    this.sim = new MatchSim(mode);
+    const info = new RoomInfo();
+    info.mode = mode;
+    this.setState(info);
+    this.setMetadata({ mode });
     this.onMessage("input", (client, message) => this.sim.setInput(client.sessionId, sanitize(message)));
     this.onMessage("team", (client, message) => this.sim.chooseTeam(client.sessionId, message === 1 ? 1 : 0));
     this.onMessage("start", () => this.sim.requestStart());
@@ -35909,7 +36201,7 @@ var port = Number(process.env.PORT) || 2567;
 var gameServer = new Server({
   transport: new WebSocketTransport()
 });
-gameServer.define("nyxt", GameRoom);
+gameServer.define("nyxt", GameRoom).filterBy(["mode"]);
 gameServer.listen(port).then(() => console.log(`\u26BD Serveur Nyxt en \xE9coute sur ws://localhost:${port}`)).catch((err) => {
   console.error("\xC9chec du d\xE9marrage du serveur :", err);
   process.exit(1);

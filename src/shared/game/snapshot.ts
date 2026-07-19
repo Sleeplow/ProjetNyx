@@ -54,11 +54,17 @@ export interface MatchSnapshot {
   haz: SnapEntity[];
   fx: FxEvent[];
   /** Mode de jeu (le client adapte le rendu). Absent = 'brawl-ball' (rétro-compat). */
-  mode?: 'brawl-ball' | 'battle-royale';
+  mode?: 'brawl-ball' | 'battle-royale' | 'battle-royale-portal';
   /** (Battle Royale) Zone sûre qui rétrécit. */
   zone?: { x: number; y: number; r: number };
   /** (Battle Royale) Cubes de power-up au sol. */
   cubes?: SnapEntity[];
   /** (Battle Royale) Nombre de survivants. */
   alive?: number;
+  /** (Portal) Portails : position + couleur (les itinérants bougent). */
+  portals?: { x: number; y: number; c: number }[];
+  /** (Portal) Intensité de la neurotoxine : m = grande salle, r = refuge (dégâts/s). */
+  gas?: { m: number; r: number };
+  /** Leaderboard cumulatif de la session (trié serveur, décroissant). */
+  board?: { n: string; s: number; b: boolean }[];
 }

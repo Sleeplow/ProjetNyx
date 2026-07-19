@@ -34587,6 +34587,231 @@ var PITCH_NYXT = {
   centerY: H / 2
 };
 
+// src/maps/portalArena.ts
+var W2 = 2160;
+var H2 = 1360;
+var DIVIDER_X = 1558;
+var DIVIDER_W = 44;
+var REFUGE_MIN_X = DIVIDER_X + DIVIDER_W / 2;
+var MAIN_RECT = { x: 0, y: 0, w: DIVIDER_X, h: H2 };
+var REFUGE_RECT = { x: DIVIDER_X + DIVIDER_W, y: 0, w: W2 - (DIVIDER_X + DIVIDER_W), h: H2 };
+var PORTAL_REGIONS = {
+  main: MAIN_RECT,
+  refuge: REFUGE_RECT,
+  refugeMinX: REFUGE_MIN_X
+};
+var PORTAL_SPAWN_RING = { cx: 760, cy: H2 / 2, r: 520 };
+var PORTAL_ARENA = {
+  id: "arena-portal",
+  name: "Chambre Nyxt",
+  width: W2,
+  height: H2,
+  bushes: [
+    { x: 640, y: 220, w: 200, h: 120 },
+    { x: 640, y: 1010, w: 200, h: 120 },
+    { x: 1160, y: 220, w: 220, h: 120 },
+    { x: 1150, y: 1010, w: 220, h: 120 },
+    { x: 900, y: 560, w: 200, h: 120 },
+    // Refuge : un peu de couvert.
+    { x: 1680, y: 200, w: 180, h: 120 },
+    { x: 1900, y: 1040, w: 180, h: 120 }
+  ],
+  obstacles: [
+    // Cloison pleine (bloque déplacements ET projectiles → refuge vraiment isolé).
+    { x: DIVIDER_X, y: 0, w: DIVIDER_W, h: H2 },
+    // Couverture — grande salle.
+    { x: 760, y: 600, w: 120, h: 120 },
+    { x: 1180, y: 560, w: 96, h: 96 },
+    { x: 440, y: 660, w: 96, h: 96 },
+    { x: 980, y: 240, w: 96, h: 96 },
+    { x: 980, y: 1024, w: 96, h: 96 },
+    { x: 180, y: 600, w: 90, h: 190 },
+    // Couverture — refuge.
+    { x: 1700, y: 560, w: 96, h: 96 },
+    { x: 1980, y: 560, w: 96, h: 96 }
+  ]
+};
+var PORTAL_PAIRS = [
+  { color: "green", roaming: false, a: { x: 560, y: 360 }, b: { x: 1720, y: 360 }, aRegion: "main", bRegion: "refuge" },
+  { color: "green", roaming: false, a: { x: 560, y: 1e3 }, b: { x: 2030, y: 1e3 }, aRegion: "main", bRegion: "refuge" },
+  { color: "green", roaming: false, a: { x: 1340, y: 680 }, b: { x: 1880, y: 680 }, aRegion: "main", bRegion: "refuge" },
+  { color: "blue", roaming: true, a: { x: 820, y: 360 }, b: { x: 1220, y: 940 }, aRegion: "main", bRegion: "main" },
+  { color: "orange", roaming: true, a: { x: 360, y: 680 }, b: { x: 1300, y: 360 }, aRegion: "main", bRegion: "main" }
+];
+var PORTAL_CFG = {
+  triggerRadius: 40,
+  landingOffset: 72,
+  cooldownMs: 750,
+  relocateMs: 13e3
+};
+var NEURO_CFG = {
+  graceMs: 9e3,
+  mainBaseDps: 8,
+  mainSlope: 1.6,
+  finalMs: 55e3,
+  refugeBaseDps: 6,
+  refugeSlope: 1.4,
+  refugeMinX: REFUGE_MIN_X
+};
+
+// src/shared/game/neurotoxin.ts
+var NeurotoxinField = class {
+  constructor(cfg) {
+    this.cfg = cfg;
+    this.elapsed = 0;
+  }
+  update(dtMs) {
+    this.elapsed += dtMs;
+  }
+  /** Le gaz a-t-il commencé (grande salle) ? */
+  get active() {
+    return this.elapsed >= this.cfg.graceMs;
+  }
+  get phase() {
+    if (this.elapsed < this.cfg.graceMs) return "grace";
+    if (this.elapsed < this.cfg.finalMs) return "flooding";
+    return "final";
+  }
+  isRefuge(x) {
+    return x >= this.cfg.refugeMinX;
+  }
+  /** Dégâts/s actuels dans la grande salle. */
+  get mainDps() {
+    const t = (this.elapsed - this.cfg.graceMs) / 1e3;
+    if (t <= 0) return 0;
+    return this.cfg.mainBaseDps + this.cfg.mainSlope * t;
+  }
+  /** Dégâts/s actuels dans le refuge (0 tant que la phase finale n'a pas commencé). */
+  get refugeDps() {
+    const t = (this.elapsed - this.cfg.finalMs) / 1e3;
+    if (t <= 0) return 0;
+    return this.cfg.refugeBaseDps + this.cfg.refugeSlope * t;
+  }
+  /** Dégâts/s subis à une position donnée. */
+  dpsAt(x, _y) {
+    return this.isRefuge(x) ? this.refugeDps : this.mainDps;
+  }
+  isDanger(x, y) {
+    return this.dpsAt(x, y) > 0;
+  }
+};
+
+// src/shared/game/portals.ts
+var COLOR_HEX = {
+  green: 4644970,
+  blue: 5092607,
+  orange: 16751932
+};
+var PortalSystem = class {
+  constructor(pairs, bounds, cfg, isFreeSpot) {
+    this.bounds = bounds;
+    this.cfg = cfg;
+    this.isFreeSpot = isFreeSpot;
+    this.endpoints = [];
+    this.cooldowns = /* @__PURE__ */ new Map();
+    this.relocTimer = 0;
+    /** Accumulateur d'animation (rotation du tourbillon), lu par le rendu. */
+    this.spin = 0;
+    this.mainCenter = { x: bounds.main.x + bounds.main.w / 2, y: bounds.main.y + bounds.main.h / 2 };
+    this.refugeCenter = { x: bounds.refuge.x + bounds.refuge.w / 2, y: bounds.refuge.y + bounds.refuge.h / 2 };
+    pairs.forEach((p, pairId) => {
+      const iA = this.endpoints.length;
+      const iB = iA + 1;
+      this.endpoints.push({ color: p.color, colorHex: COLOR_HEX[p.color], x: p.a.x, y: p.a.y, link: iB, region: p.aRegion, roaming: p.roaming, pair: pairId });
+      this.endpoints.push({ color: p.color, colorHex: COLOR_HEX[p.color], x: p.b.x, y: p.b.y, link: iA, region: p.bRegion, roaming: p.roaming, pair: pairId });
+    });
+  }
+  update(dtMs) {
+    this.spin += dtMs / 1e3;
+    for (const [id, cd] of this.cooldowns) {
+      const next = cd - dtMs;
+      if (next <= 0) this.cooldowns.delete(id);
+      else this.cooldowns.set(id, next);
+    }
+    this.relocTimer += dtMs;
+    if (this.relocTimer >= this.cfg.relocateMs) {
+      this.relocTimer = 0;
+      this.relocateRoaming();
+    }
+  }
+  /** Tente de téléporter l'acteur s'il est sur un portail. Renvoie true si téléporté. */
+  tryTeleport(actor) {
+    if (!actor.alive) return false;
+    if ((this.cooldowns.get(actor.id) ?? 0) > 0) return false;
+    const trig = this.cfg.triggerRadius;
+    for (const ep of this.endpoints) {
+      const dx = actor.x - ep.x;
+      const dy = actor.y - ep.y;
+      if (dx * dx + dy * dy > trig * trig) continue;
+      const dest = this.endpoints[ep.link];
+      const center = dest.region === "refuge" ? this.refugeCenter : this.mainCenter;
+      let nx = center.x - dest.x;
+      let ny = center.y - dest.y;
+      const l = Math.hypot(nx, ny);
+      if (l < 1e-3) {
+        nx = 0;
+        ny = 1;
+      } else {
+        nx /= l;
+        ny /= l;
+      }
+      const off = this.cfg.landingOffset;
+      actor.x = dest.x + nx * off;
+      actor.y = dest.y + ny * off;
+      this.cooldowns.set(actor.id, this.cfg.cooldownMs);
+      return true;
+    }
+    return false;
+  }
+  /** Portail vert le plus proche dans une région donnée (pour l'IA en fuite). */
+  nearestGreenTo(x, y, region) {
+    let best = null;
+    let bestD = Infinity;
+    for (const ep of this.endpoints) {
+      if (ep.color !== "green" || ep.region !== region) continue;
+      const d = (ep.x - x) ** 2 + (ep.y - y) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = { x: ep.x, y: ep.y };
+      }
+    }
+    return best;
+  }
+  relocateRoaming() {
+    const pairs = /* @__PURE__ */ new Map();
+    for (const ep of this.endpoints) {
+      if (!ep.roaming) continue;
+      const arr = pairs.get(ep.pair) ?? [];
+      arr.push(ep);
+      pairs.set(ep.pair, arr);
+    }
+    for (const eps of pairs.values()) {
+      if (eps.length !== 2) continue;
+      const a = this.randSpotInMain();
+      let b = this.randSpotInMain();
+      let tries = 0;
+      while ((b.x - a.x) ** 2 + (b.y - a.y) ** 2 < 520 * 520 && tries < 12) {
+        b = this.randSpotInMain();
+        tries++;
+      }
+      eps[0].x = a.x;
+      eps[0].y = a.y;
+      eps[1].x = b.x;
+      eps[1].y = b.y;
+    }
+  }
+  randSpotInMain() {
+    const r = this.bounds.main;
+    const margin = 70;
+    for (let i = 0; i < 40; i++) {
+      const x = r.x + margin + Math.random() * (r.w - margin * 2);
+      const y = r.y + margin + Math.random() * (r.h - margin * 2);
+      if (this.isFreeSpot(x, y, margin)) return { x, y };
+    }
+    return { x: this.mainCenter.x, y: this.mainCenter.y };
+  }
+};
+
 // src/config/constants.ts
 var COLORS = {
   background: 723738,
@@ -35010,7 +35235,14 @@ function norm(x, y) {
   return d < 1e-4 ? { x: 0, y: 0 } : { x: x / d, y: y / d };
 }
 var BattleBot = class {
-  update(self, world, _dtMs) {
+  constructor() {
+    // Point d'errance mémorisé (rafraîchi périodiquement, pas chaque frame).
+    this.wx = 0;
+    this.wy = 0;
+    this.wanderMs = 0;
+    this.seeded = false;
+  }
+  update(self, world, dtMs) {
     const inp = emptyInput();
     inp.aimX = Math.cos(self.aimAngle);
     inp.aimY = Math.sin(self.aimAngle);
@@ -35024,12 +35256,30 @@ var BattleBot = class {
         foe = o;
       }
     }
-    const cx = world.zone.x;
-    const cy = world.zone.y;
-    const distZone = Math.hypot(self.x - cx, self.y - cy);
-    const outside = distZone > world.zone.r - 50;
-    const lowHp = self.healthRatio < 0.3;
     const range = self.def.attack.range;
+    const lowHp = self.healthRatio < 0.3;
+    let outside = false;
+    let retreat = null;
+    if (world.danger) {
+      if (world.danger.inDanger(self.x, self.y)) {
+        retreat = world.danger.retreat(self.x, self.y);
+        outside = retreat !== null;
+      }
+    } else {
+      const distZone = Math.hypot(self.x - world.zone.x, self.y - world.zone.y);
+      if (distZone > world.zone.r - 50) {
+        outside = true;
+        retreat = { x: world.zone.x, y: world.zone.y };
+      }
+    }
+    this.wanderMs -= dtMs;
+    if (!this.seeded || this.wanderMs <= 0) {
+      const w = world.danger ? world.danger.wander(self.x, self.y) : { x: world.zone.x, y: world.zone.y };
+      this.wx = w.x;
+      this.wy = w.y;
+      this.wanderMs = 1e3;
+      this.seeded = true;
+    }
     const move = (dx, dy) => {
       const n = norm(dx, dy);
       inp.moveX = n.x;
@@ -35042,8 +35292,8 @@ var BattleBot = class {
       inp.attackReleased = true;
       if (self.ultReady) inp.ultimate = true;
     };
-    if (outside) {
-      move(cx - self.x, cy - self.y);
+    if (outside && retreat) {
+      move(retreat.x - self.x, retreat.y - self.y);
       if (foe && fd < range) shootAt(foe);
     } else if (lowHp && foe) {
       move(self.x - foe.x, self.y - foe.y);
@@ -35064,7 +35314,7 @@ var BattleBot = class {
         }
       }
       if (cube) move(cube.x - self.x, cube.y - self.y);
-      else if (distZone > 80) move(cx - self.x, cy - self.y);
+      else if (Math.hypot(this.wx - self.x, this.wy - self.y) > 80) move(this.wx - self.x, this.wy - self.y);
     }
     return inp;
   }
@@ -35104,15 +35354,14 @@ var LOBBY_MS = 3e4;
 var KICKOFF_MS = 2200;
 var TEAM_SIZE = SOCCER.teamSize;
 var MAP = PITCH_NYXT.map;
-var W2 = MAP.width;
-var H2 = MAP.height;
+var W3 = MAP.width;
+var H3 = MAP.height;
 var OBS = MAP.obstacles;
 var BR_PLAYERS = 6;
 var BR_MATCH_MS = 18e4;
-var ZONE_CENTER = { x: W2 / 2, y: H2 / 2 };
-var ZONE_INIT = Math.hypot(W2 / 2, H2 / 2) + 60;
 var ZONE_MIN = 240;
 var BR_SHRINK_MS = 78e3;
+var TELEPORT_INVULN_MS = 1200;
 var SimCube = class {
   constructor(x, y) {
     this.x = x;
@@ -35137,6 +35386,8 @@ var SimCombatant = class {
     this.ultCharge = 0;
     this.slowTimer = 0;
     this.slowFactor = 1;
+    /** Invincibilité restante (ms) — bref répit à la sortie d'un portail (Portal). */
+    this.invulnMs = 0;
     this.kbX = 0;
     this.kbY = 0;
     this.sinceCombatMs = 0;
@@ -35171,8 +35422,11 @@ var SimCombatant = class {
   get ultReady() {
     return this.ultCharge >= 100;
   }
+  grantInvuln(ms) {
+    this.invulnMs = Math.max(this.invulnMs, ms);
+  }
   takeDamage(amount) {
-    if (!this.alive) return 0;
+    if (!this.alive || this.invulnMs > 0) return 0;
     if (amount > 0) this.sinceCombatMs = 0;
     const before = this.health;
     this.health = Math.max(0, this.health - amount);
@@ -35208,6 +35462,7 @@ var SimCombatant = class {
   tickTimers(dtMs) {
     if (this.reloadTimer > 0) this.reloadTimer -= dtMs;
     if (this.slowTimer > 0) this.slowTimer -= dtMs;
+    if (this.invulnMs > 0) this.invulnMs -= dtMs;
     this.sinceCombatMs += dtMs;
   }
   noteAttack() {
@@ -35360,8 +35615,8 @@ var SimBall = class {
           this.vy -= (1 + BALL.restitution) * dot * n.y;
         }
       }
-      this.x = clamp(this.x, this.radius, W2 - this.radius);
-      this.y = clamp(this.y, this.radius, H2 - this.radius);
+      this.x = clamp(this.x, this.radius, W3 - this.radius);
+      this.y = clamp(this.y, this.radius, H3 - this.radius);
     }
     const decay = Math.exp(-BALL.friction * dtSec);
     this.vx *= decay;
@@ -35389,8 +35644,13 @@ var MatchSim = class {
     this.teamSeq = 0;
     // équipe unique par joueur en FFA
     this.cubesArr = [];
-    this.zoneRadius = ZONE_INIT;
+    this.zoneRadius = 0;
     this.zoneElapsed = 0;
+    this.brDeaths = 0;
+    // nombre d'éliminés dans la manche (→ points de classement)
+    // Leaderboard cumulatif de la session (SURVIT aux revanches). Clé stable :
+    // humains par sessionId, bots par nom (« Bot 1 »…).
+    this.board = /* @__PURE__ */ new Map();
     this.phase = "lobby";
     this.timer = LOBBY_MS;
     this.matchClock = SOCCER.matchMs;
@@ -35398,13 +35658,68 @@ var MatchSim = class {
     this.winner = -1;
     this.score = [0, 0];
     this.fx = [];
+    const arena = this.isPortal ? PORTAL_ARENA : PITCH_NYXT.map;
+    this.W = arena.width;
+    this.H = arena.height;
+    this.OBS = arena.obstacles;
+    this.zoneCenter = { x: this.W / 2, y: this.H / 2 };
+    this.zoneInit = Math.hypot(this.W / 2, this.H / 2) + 60;
+    this.zoneRadius = this.zoneInit;
+    if (this.isPortal) {
+      this.neuro = new NeurotoxinField(NEURO_CFG);
+      this.portals = new PortalSystem(
+        PORTAL_PAIRS,
+        { main: PORTAL_REGIONS.main, refuge: PORTAL_REGIONS.refuge },
+        PORTAL_CFG,
+        (x, y, margin) => this.isFreeSpot(x, y, margin)
+      );
+    }
   }
+  /** Les deux variantes de Battle Royale (classic + Portal). */
   get isBR() {
-    return this.mode === "battle-royale";
+    return this.mode !== "brawl-ball";
+  }
+  get isPortal() {
+    return this.mode === "battle-royale-portal";
+  }
+  /** Emplacement libre (grande salle, hors obstacle) pour relocaliser les portails. */
+  isFreeSpot(x, y, margin) {
+    if (x < margin || y < margin || x > this.W - margin || y > this.H - margin) return false;
+    return !this.OBS.some((o) => circleHitsRect(x, y, margin, o));
   }
   brSpawn(i, n) {
     const a = i / Math.max(1, n) * Math.PI * 2 - Math.PI / 2;
-    return { x: ZONE_CENTER.x + Math.cos(a) * W2 * 0.34, y: ZONE_CENTER.y + Math.sin(a) * H2 * 0.32 };
+    if (this.isPortal) {
+      return { x: PORTAL_SPAWN_RING.cx + Math.cos(a) * PORTAL_SPAWN_RING.r, y: PORTAL_SPAWN_RING.cy + Math.sin(a) * PORTAL_SPAWN_RING.r };
+    }
+    return { x: this.zoneCenter.x + Math.cos(a) * this.W * 0.34, y: this.zoneCenter.y + Math.sin(a) * this.H * 0.32 };
+  }
+  // ---------- Leaderboard cumulatif ----------
+  /** Nom stable pour un bot (« Bot 1 », « Bot 2 »…), par ordre d'apparition. */
+  nextBotName() {
+    return `Bot ${this.combatants.filter((c) => c.isBot).length + 1}`;
+  }
+  boardKey(c) {
+    return c.isBot ? `bot:${c.name}` : `me:${c.id}`;
+  }
+  awardBoard(c, pts) {
+    const k = this.boardKey(c);
+    const e = this.board.get(k) ?? { name: c.name, score: 0, isBot: c.isBot };
+    e.score += pts;
+    e.name = c.name;
+    e.isBot = c.isBot;
+    this.board.set(k, e);
+  }
+  /** Points de fin de manche (BR : classement ; foot : victoire/nul/défaite). */
+  awardEndOfMatch(winnerTeam) {
+    if (this.isBR) {
+      for (const c of this.combatants) if (c.alive) this.awardBoard(c, this.brDeaths);
+    } else {
+      for (const c of this.combatants) {
+        const pts = winnerTeam < 0 ? 1 : c.team === winnerTeam ? 3 : 0;
+        this.awardBoard(c, pts);
+      }
+    }
   }
   // ---------- Joueurs (join / leave / équipe) ----------
   humanCount() {
@@ -35477,14 +35792,14 @@ var MatchSim = class {
     const botId = `bot${this.botSeq++}`;
     if (this.isBR) {
       c.id = botId;
+      c.name = this.nextBotName();
       c.isBot = true;
-      c.name = "Bot";
       this.bots.set(botId, new BattleBot());
     } else {
       if (this.ball.carrierId === c.id) this.ball.drop(PITCH_NYXT.centerX - c.x, PITCH_NYXT.centerY - c.y);
       this.reassignId(c, botId);
+      c.name = this.nextBotName();
       c.isBot = true;
-      c.name = "Bot";
       this.bots.set(botId, new SoccerBot(spawnsFor(c.team)[0].role));
     }
     if (this.humanCount() === 0) this.resetToLobby();
@@ -35526,7 +35841,7 @@ var MatchSim = class {
     this.ball.x = PITCH_NYXT.ballStart.x;
     this.ball.y = PITCH_NYXT.ballStart.y;
     this.cubesArr = [];
-    this.zoneRadius = ZONE_INIT;
+    this.zoneRadius = this.zoneInit;
     this.zoneElapsed = 0;
     for (const c of this.combatants) {
       c.cubes = 0;
@@ -35551,7 +35866,7 @@ var MatchSim = class {
         const sp = spawnsFor(team)[members];
         const def = ZAREKS[Math.floor(Math.random() * ZAREKS.length)];
         const id = `bot${this.botSeq++}`;
-        this.combatants.push(new SimCombatant(id, "Bot", team, def.id, def, true, sp.x, sp.y));
+        this.combatants.push(new SimCombatant(id, this.nextBotName(), team, def.id, def, true, sp.x, sp.y));
         this.bots.set(id, new SoccerBot(sp.role));
         members++;
       }
@@ -35571,7 +35886,7 @@ var MatchSim = class {
     while (this.combatants.length < BR_PLAYERS) {
       const def = ZAREKS[Math.floor(Math.random() * ZAREKS.length)];
       const id = `bot${this.botSeq++}`;
-      this.combatants.push(new SimCombatant(id, "Bot", this.teamSeq++, def.id, def, true, 0, 0));
+      this.combatants.push(new SimCombatant(id, this.nextBotName(), this.teamSeq++, def.id, def, true, 0, 0));
       this.bots.set(id, new BattleBot());
     }
     const n = this.combatants.length;
@@ -35585,8 +35900,10 @@ var MatchSim = class {
       c.ultCharge = 0;
     });
     this.spawnCubes();
-    this.zoneRadius = ZONE_INIT;
+    this.zoneRadius = this.zoneInit;
     this.zoneElapsed = 0;
+    this.brDeaths = 0;
+    if (this.neuro) this.neuro.elapsed = 0;
     this.winner = -1;
     this.projectiles = [];
     this.hazards = [];
@@ -35595,13 +35912,15 @@ var MatchSim = class {
   }
   spawnCubes() {
     this.cubesArr = [];
+    const region = this.isPortal ? PORTAL_REGIONS.main : { x: 0, y: 0, w: this.W, h: this.H };
+    const m = 120;
     let placed = 0;
     let tries = 0;
     while (placed < POWER_CUBE.initialCount && tries < 300) {
       tries++;
-      const x = 120 + Math.random() * (W2 - 240);
-      const y = 120 + Math.random() * (H2 - 240);
-      if (OBS.some((o) => circleHitsRect(x, y, POWER_CUBE.radius + 8, o))) continue;
+      const x = region.x + m + Math.random() * (region.w - m * 2);
+      const y = region.y + m + Math.random() * (region.h - m * 2);
+      if (this.OBS.some((o) => circleHitsRect(x, y, POWER_CUBE.radius + 8, o))) continue;
       this.cubesArr.push(new SimCube(x, y));
       placed++;
     }
@@ -35609,11 +35928,20 @@ var MatchSim = class {
   updateZone(dtMs, dtSec) {
     this.zoneElapsed += dtMs;
     const t = clamp((this.zoneElapsed - ZONE.startDelayMs) / BR_SHRINK_MS, 0, 1);
-    this.zoneRadius = ZONE_INIT + (ZONE_MIN - ZONE_INIT) * t;
+    this.zoneRadius = this.zoneInit + (ZONE_MIN - this.zoneInit) * t;
     const dps = ZONE.baseDamagePerSecond + t * 18;
     for (const c of this.combatants) {
       if (!c.alive) continue;
-      if (dist(c.x, c.y, ZONE_CENTER.x, ZONE_CENTER.y) > this.zoneRadius) c.takeDamage(dps * dtSec);
+      if (dist(c.x, c.y, this.zoneCenter.x, this.zoneCenter.y) > this.zoneRadius) c.takeDamage(dps * dtSec);
+    }
+  }
+  /** Neurotoxine (Portal) : dégâts par région (gaz déjà avancé avant le déplacement). */
+  applyNeuroDamage(dtSec) {
+    const neuro = this.neuro;
+    for (const c of this.combatants) {
+      if (!c.alive) continue;
+      const d = neuro.dpsAt(c.x, c.y);
+      if (d > 0) c.takeDamage(d * dtSec);
     }
   }
   updateCubes() {
@@ -35633,10 +35961,30 @@ var MatchSim = class {
     return {
       all: this.combatants,
       cubes: this.cubesArr,
-      zone: { x: ZONE_CENTER.x, y: ZONE_CENTER.y, r: this.zoneRadius },
-      obstacles: OBS,
-      width: W2,
-      height: H2
+      zone: { x: this.zoneCenter.x, y: this.zoneCenter.y, r: this.zoneRadius },
+      obstacles: this.OBS,
+      width: this.W,
+      height: this.H,
+      danger: this.isPortal ? this.buildDanger() : void 0
+    };
+  }
+  /** Stratégie de fuite pour l'IA en Portal : neurotoxine → portail vert / refuge. */
+  buildDanger() {
+    const neuro = this.neuro;
+    const portals = this.portals;
+    return {
+      inDanger: (x, y) => neuro.isDanger(x, y),
+      retreat: (x, y) => {
+        if (!neuro.active) return null;
+        if (neuro.isRefuge(x)) return null;
+        if (neuro.mainDps <= 0) return null;
+        return portals.nearestGreenTo(x, y, "main");
+      },
+      wander: (x) => {
+        const r = neuro.isRefuge(x) ? PORTAL_REGIONS.refuge : PORTAL_REGIONS.main;
+        const m = 100;
+        return { x: r.x + m + Math.random() * (r.w - m * 2), y: r.y + m + Math.random() * (r.h - m * 2) };
+      }
     };
   }
   /** Fin de BR dès qu'il ne reste qu'un survivant (ou personne = nul). */
@@ -35674,6 +36022,7 @@ var MatchSim = class {
     this.winner = winnerTeam;
     this.phase = "ended";
     this.timer = 0;
+    this.awardEndOfMatch(winnerTeam);
   }
   // ---------- Boucle ----------
   step(dtMs) {
@@ -35702,8 +36051,15 @@ var MatchSim = class {
       case "playing":
         if (this.isBR) {
           this.matchClock -= dtMs;
-          this.simulate(dtMs, dtSec);
-          this.updateZone(dtMs, dtSec);
+          if (this.isPortal) {
+            this.neuro.update(dtMs);
+            this.portals.update(dtMs);
+            this.simulate(dtMs, dtSec);
+            this.applyNeuroDamage(dtSec);
+          } else {
+            this.simulate(dtMs, dtSec);
+            this.updateZone(dtMs, dtSec);
+          }
           this.updateCubes();
           this.checkSurvivors();
           if (this.phase === "playing" && this.matchClock <= 0) {
@@ -35748,9 +36104,9 @@ var MatchSim = class {
       ball: { x: this.ball.x, y: this.ball.y, carrierId: this.ball.carrierId, free: this.ball.free },
       leftGoal: { x: PITCH_NYXT.leftGoal.centerX, y: PITCH_NYXT.leftGoal.centerY },
       rightGoal: { x: PITCH_NYXT.rightGoal.centerX, y: PITCH_NYXT.rightGoal.centerY },
-      obstacles: OBS,
-      width: W2,
-      height: H2,
+      obstacles: this.OBS,
+      width: this.W,
+      height: this.H,
       frozen: false
     };
   }
@@ -35780,19 +36136,29 @@ var MatchSim = class {
       let ny = c.y + mv.y * spd * dtSec + c.kbY * dtSec;
       c.kbX *= kbDecay;
       c.kbY *= kbDecay;
-      nx = clamp(nx, c.def.radius, W2 - c.def.radius);
-      ny = clamp(ny, c.def.radius, H2 - c.def.radius);
-      for (const ob of OBS) {
+      nx = clamp(nx, c.def.radius, this.W - c.def.radius);
+      ny = clamp(ny, c.def.radius, this.H - c.def.radius);
+      for (const ob of this.OBS) {
         const res = resolveCircleRect(nx, ny, c.def.radius, ob);
         if (res) {
           nx = res.x;
           ny = res.y;
         }
       }
-      c.x = clamp(nx, c.def.radius, W2 - c.def.radius);
-      c.y = clamp(ny, c.def.radius, H2 - c.def.radius);
+      c.x = clamp(nx, c.def.radius, this.W - c.def.radius);
+      c.y = clamp(ny, c.def.radius, this.H - c.def.radius);
     }
     this.separate();
+    if (this.isPortal) {
+      for (const c of this.combatants) {
+        if (!c.alive) continue;
+        if (this.portals.tryTeleport(c)) {
+          c.x = clamp(c.x, c.def.radius, this.W - c.def.radius);
+          c.y = clamp(c.y, c.def.radius, this.H - c.def.radius);
+          c.grantInvuln(TELEPORT_INVULN_MS);
+        }
+      }
+    }
     for (const c of this.combatants) {
       if (!c.alive) continue;
       const inp = inputs.get(c.id);
@@ -35834,10 +36200,10 @@ var MatchSim = class {
           const push = (minD - d) / 2;
           const nx = dx / d;
           const ny = dy / d;
-          a.x = clamp(a.x - nx * push, a.def.radius, W2 - a.def.radius);
-          a.y = clamp(a.y - ny * push, a.def.radius, H2 - a.def.radius);
-          b.x = clamp(b.x + nx * push, b.def.radius, W2 - b.def.radius);
-          b.y = clamp(b.y + ny * push, b.def.radius, H2 - b.def.radius);
+          a.x = clamp(a.x - nx * push, a.def.radius, this.W - a.def.radius);
+          a.y = clamp(a.y - ny * push, a.def.radius, this.H - a.def.radius);
+          b.x = clamp(b.x + nx * push, b.def.radius, this.W - b.def.radius);
+          b.y = clamp(b.y + ny * push, b.def.radius, this.H - b.def.radius);
         }
       }
     }
@@ -35988,11 +36354,11 @@ var MatchSim = class {
       const isPotion = p.landsInto !== null;
       const ownerTeam = this.teamOf(p.ownerId);
       let landed = !p.alive;
-      if (p.x < 0 || p.y < 0 || p.x > W2 || p.y > H2) {
+      if (p.x < 0 || p.y < 0 || p.x > this.W || p.y > this.H) {
         p.kill();
         landed = true;
       } else {
-        for (const ob of OBS) {
+        for (const ob of this.OBS) {
           if (circleHitsRect(p.x, p.y, p.radius, ob)) {
             p.kill();
             landed = true;
@@ -36089,6 +36455,8 @@ var MatchSim = class {
   handleDeath(c) {
     this.fx.push({ k: "death", x: c.x, y: c.y, c: c.def.color });
     if (this.isBR) {
+      this.awardBoard(c, this.brDeaths);
+      this.brDeaths++;
       c.eliminated = true;
       return;
     }
@@ -36128,9 +36496,17 @@ var MatchSim = class {
       mode: this.mode
     };
     if (this.isBR) {
-      snap.zone = { x: ZONE_CENTER.x, y: ZONE_CENTER.y, r: Math.round(this.zoneRadius) };
       snap.cubes = this.cubesArr.filter((q) => q.alive).map((q) => ({ x: Math.round(q.x), y: Math.round(q.y), r: POWER_CUBE.radius, c: COLORS.powerCube }));
       snap.alive = this.combatants.filter((c) => c.alive).length;
+      if (this.isPortal) {
+        snap.portals = this.portals.endpoints.map((e) => ({ x: Math.round(e.x), y: Math.round(e.y), c: e.colorHex }));
+        snap.gas = { m: Math.round(this.neuro.mainDps), r: Math.round(this.neuro.refugeDps) };
+      } else {
+        snap.zone = { x: this.zoneCenter.x, y: this.zoneCenter.y, r: Math.round(this.zoneRadius) };
+      }
+    }
+    if (this.board.size) {
+      snap.board = [...this.board.values()].sort((a, b) => b.score - a.score).map((e) => ({ n: e.name, s: e.score, b: e.isBot }));
     }
     return snap;
   }
@@ -36151,7 +36527,7 @@ var GameRoom = class extends Room {
     this.maxClients = 6;
   }
   onCreate(options) {
-    const mode = options?.mode === "battle-royale" ? "battle-royale" : "brawl-ball";
+    const mode = options?.mode === "battle-royale" ? "battle-royale" : options?.mode === "battle-royale-portal" ? "battle-royale-portal" : "brawl-ball";
     this.sim = new MatchSim(mode);
     const info = new RoomInfo();
     info.mode = mode;

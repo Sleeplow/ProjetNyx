@@ -2,10 +2,11 @@ import Phaser from 'phaser';
 import type { Room } from 'colyseus.js';
 import { PlayerController } from '../input/PlayerController';
 import { PITCH_NYXT } from '../maps/pitchNyxt';
+import { PORTAL_ARENA, PORTAL_REGIONS } from '../maps/portalArena';
 import { COLORS } from '../config/constants';
 import { TEAM } from '../config/soccer';
 import { ZAREKS, ZAREK_BY_ID } from '../zareks/registry';
-import type { ZarekDef } from '../core/types';
+import type { ZarekDef, MapDef } from '../core/types';
 import { stepMovement } from '../shared/game/movement';
 import { clamp, dist } from '../core/geometry';
 import { makeButton, type Button } from '../ui/widgets';
@@ -14,6 +15,8 @@ import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { drawCartoonPitch } from '../render/pitchRender';
 import { drawChainBolt } from '../render/fx';
 import type { MatchSnapshot, SnapPlayer, FxEvent } from '../shared/game/snapshot';
+
+const TAU = Math.PI * 2;
 
 interface Avatar {
   vis: AvatarVisual;
@@ -38,12 +41,16 @@ export class OnlineGameScene extends Phaser.Scene {
   private snap: MatchSnapshot | null = null;
 
   private mode = 'brawl-ball';
+  private arena: MapDef = PITCH_NYXT.map;
   private avatars = new Map<string, Avatar>();
   private ballGfx!: Phaser.GameObjects.Container;
   private projGfx!: Phaser.GameObjects.Graphics;
   private hazGfx!: Phaser.GameObjects.Graphics;
   private zoneGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) zone qui rétrécit
   private cubeGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) cubes de power-up
+  private gasGfx!: Phaser.GameObjects.Graphics; // (Portal) voiles de neurotoxine
+  private portalGfx!: Phaser.GameObjects.Graphics; // (Portal) anneaux de portails
+  private fxTime = 0;
   private dangerVignette!: Phaser.GameObjects.Rectangle; // (Battle Royale) hors zone
   private quitText!: Phaser.GameObjects.Text;
   private localStub = { x: PITCH_NYXT.centerX, y: PITCH_NYXT.centerY, def: zdef(ZAREKS[0].id) };
@@ -66,6 +73,7 @@ export class OnlineGameScene extends Phaser.Scene {
   private overlayButtons: Button[] = [];
   private lobbyInfo?: Phaser.GameObjects.Text;
   private lobbyList?: Phaser.GameObjects.Text;
+  private boardText?: Phaser.GameObjects.Text; // leaderboard cumulatif (lobby + fin)
 
   // Spectateur (Battle Royale) après élimination
   private spectateId: string | null = null;
@@ -77,6 +85,14 @@ export class OnlineGameScene extends Phaser.Scene {
     super('OnlineGame');
   }
 
+  /** Toute variante de Battle Royale (classic + Portal). */
+  private isBR(): boolean {
+    return this.mode !== 'brawl-ball';
+  }
+  private isPortal(): boolean {
+    return this.mode === 'battle-royale-portal';
+  }
+
   create(data: { room?: Room; zarekId?: string; modeId?: string }): void {
     if (!data?.room) {
       this.scene.start('OnlineMenu');
@@ -85,31 +101,37 @@ export class OnlineGameScene extends Phaser.Scene {
     this.room = data.room;
     this.zarekId = data.zarekId ?? ZAREKS[0].id;
     this.mode = data.modeId ?? 'brawl-ball';
+    this.arena = this.isPortal() ? PORTAL_ARENA : PITCH_NYXT.map;
     this.localStub.def = zdef(this.zarekId);
     this.snap = null;
     this.avatars = new Map();
     this.spectateId = null;
+    this.fxTime = 0;
 
-    const { width, height } = PITCH_NYXT.map;
+    const { width, height } = this.arena;
     this.cameras.main.setBounds(0, 0, width, height);
     this.cameras.main.setZoom(1);
     this.drawPitch();
 
     this.zoneGfx = this.add.graphics().setDepth(1);
     this.cubeGfx = this.add.graphics().setDepth(12);
+    this.gasGfx = this.add.graphics().setDepth(12);
+    this.portalGfx = this.add.graphics().setDepth(13);
     this.hazGfx = this.add.graphics().setDepth(11);
     this.ballGfx = this.makeBall();
-    if (this.mode === 'battle-royale') this.ballGfx.setVisible(false);
+    if (this.isBR()) this.ballGfx.setVisible(false);
     this.projGfx = this.add.graphics().setDepth(18);
     this.dangerVignette = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0xff2a2a, 0).setScrollFactor(0).setDepth(800);
 
     this.controller = new PlayerController(this);
     this.buildHud();
 
-    this.predX = PITCH_NYXT.centerX;
-    this.predY = PITCH_NYXT.centerY;
-    this.camX = PITCH_NYXT.centerX;
-    this.camY = PITCH_NYXT.centerY;
+    const acx = width / 2;
+    const acy = height / 2;
+    this.predX = acx;
+    this.predY = acy;
+    this.camX = acx;
+    this.camY = acy;
     this.cameras.main.centerOn(this.camX, this.camY);
 
     this.room.onMessage('snap', (s: MatchSnapshot) => {
@@ -130,6 +152,7 @@ export class OnlineGameScene extends Phaser.Scene {
     if (!this.room || !this.snap) return;
     const dtMs = Math.min(delta, 50);
     const dtSec = dtMs / 1000;
+    this.fxTime += dtMs;
     const snap = this.snap;
     const meId = this.room.sessionId;
     const me = snap.players.find((p) => p.i === meId);
@@ -144,7 +167,7 @@ export class OnlineGameScene extends Phaser.Scene {
     if (me && me.al && snap.phase === 'playing') {
       let spd = localDef.moveSpeed;
       if (me.carry) spd *= 0.9;
-      const moved = stepMovement(this.predX, this.predY, localDef.radius, input.moveX, input.moveY, spd, dtSec, PITCH_NYXT.map.obstacles, PITCH_NYXT.map.width, PITCH_NYXT.map.height);
+      const moved = stepMovement(this.predX, this.predY, localDef.radius, input.moveX, input.moveY, spd, dtSec, this.arena.obstacles, this.arena.width, this.arena.height);
       this.predX = moved.x;
       this.predY = moved.y;
       // Recalage vers l'autorité serveur : TRÈS doux en mouvement (sinon le retard
@@ -182,6 +205,8 @@ export class OnlineGameScene extends Phaser.Scene {
       const ty = isSelf ? this.predY : p.y;
       if (isSelf) {
         av.vis.container.setPosition(tx, ty);
+      } else if (dist(av.vis.container.x, av.vis.container.y, tx, ty) > 240) {
+        av.vis.container.setPosition(tx, ty); // téléportation (Portal) : saut net, pas de glisse à travers le mur
       } else {
         av.vis.container.x = Phaser.Math.Linear(av.vis.container.x, tx, 0.35);
         av.vis.container.y = Phaser.Math.Linear(av.vis.container.y, ty, 0.35);
@@ -199,9 +224,10 @@ export class OnlineGameScene extends Phaser.Scene {
       }
     }
 
-    // 3) Balle (foot) OU zone + cubes (BR), puis projectiles + zones d'effet.
-    if (this.mode === 'battle-royale') {
-      this.renderZone(snap);
+    // 3) Balle (foot) OU zone/portails + cubes (BR), puis projectiles + zones d'effet.
+    if (this.isBR()) {
+      if (this.isPortal()) this.renderPortalFx(snap);
+      else this.renderZone(snap);
       this.renderCubes(snap);
       this.updateDanger(snap, me);
     } else {
@@ -221,8 +247,8 @@ export class OnlineGameScene extends Phaser.Scene {
 
     // 4) Caméra : joueur local prédit, ou survivant observé (spectateur BR).
     const spec = this.updateSpectator(snap, me);
-    const fx = spec ? spec.x : me ? this.predX : PITCH_NYXT.centerX;
-    const fy = spec ? spec.y : me ? this.predY : PITCH_NYXT.centerY;
+    const fx = spec ? spec.x : me ? this.predX : this.arena.width / 2;
+    const fy = spec ? spec.y : me ? this.predY : this.arena.height / 2;
     this.camX = Phaser.Math.Linear(this.camX, fx, spec ? 0.14 : 0.12);
     this.camY = Phaser.Math.Linear(this.camY, fy, spec ? 0.14 : 0.12);
     this.cameras.main.centerOn(this.camX, this.camY);
@@ -241,7 +267,7 @@ export class OnlineGameScene extends Phaser.Scene {
 
   private spawnAvatar(p: SnapPlayer, isSelf: boolean): Avatar {
     // FFA (Battle Royale) : anneau rouge « ennemi » pour tous les autres.
-    const teamColor = this.mode === 'battle-royale' ? 0xff6b5e : p.t === 0 ? TEAM.colorA : TEAM.colorB;
+    const teamColor = this.isBR() ? 0xff6b5e : p.t === 0 ? TEAM.colorA : TEAM.colorB;
     const vis = createAvatarVisual(this, zdef(p.z), { isSelf, teamColor, label: isSelf ? `${p.n} (toi)` : p.n });
     vis.container.setPosition(p.x, p.y).setDepth(isSelf ? 20 : 15);
     vis.popIn();
@@ -341,7 +367,7 @@ export class OnlineGameScene extends Phaser.Scene {
   }
 
   private updateHud(snap: MatchSnapshot, me?: SnapPlayer): void {
-    if (this.mode === 'battle-royale') this.scoreText.setText(`🏆 Survivants : ${snap.alive ?? snap.players.filter((p) => p.al).length}`);
+    if (this.isBR()) this.scoreText.setText(`🏆 Survivants : ${snap.alive ?? snap.players.filter((p) => p.al).length}`);
     else this.scoreText.setText(`${TEAM.labelA}  ${snap.score[0]} — ${snap.score[1]}  ${TEAM.labelB}`);
 
     if (snap.phase === 'playing') {
@@ -366,7 +392,7 @@ export class OnlineGameScene extends Phaser.Scene {
       this.bigText.setText('BUT !').setColor('#ffffff').setVisible(true);
     } else if (snap.phase === 'playing' && me && !me.al) {
       // En BR, le bandeau spectateur affiche l'état ; on masque le grand texte central.
-      if (this.mode === 'battle-royale') this.bigText.setVisible(false);
+      if (this.isBR()) this.bigText.setVisible(false);
       else this.bigText.setText(`Réapparition dans ${Math.ceil(me.rs / 1000)}…`).setColor('#ff6b5e').setVisible(true);
     } else {
       this.bigText.setVisible(false);
@@ -382,6 +408,7 @@ export class OnlineGameScene extends Phaser.Scene {
     this.overlayObjs = [];
     this.lobbyInfo = undefined;
     this.lobbyList = undefined;
+    this.boardText = undefined;
   }
 
   private buildOverlay(phase: string): void {
@@ -396,7 +423,7 @@ export class OnlineGameScene extends Phaser.Scene {
     };
 
     if (phase === 'lobby') {
-      const isBR = this.mode === 'battle-royale';
+      const isBR = this.isBR();
       const py = h * 0.42;
       add(this.add.rectangle(cx, py, 520, 300, 0x120f28, 0.92).setStrokeStyle(3, 0x2f8f5a).setScrollFactor(0).setDepth(D));
       add(this.add.text(cx, py - 120, 'SALLE D’ATTENTE', { fontFamily: 'system-ui, sans-serif', fontSize: '28px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
@@ -411,23 +438,34 @@ export class OnlineGameScene extends Phaser.Scene {
       this.lobbyList = add(this.add.text(cx, isBR ? py - 12 : py + 26, '', { fontFamily: 'system-ui, sans-serif', fontSize: '15px', color: '#cfcfe6', align: 'center', lineSpacing: 3, wordWrap: { width: 480 } }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(D + 1));
       this.overlayButtons.push(this.uiButton(cx, py + 118, 260, 56, 'DÉMARRER', 0x2f8f5a, () => this.room.send('start')));
     } else if (phase === 'ended') {
-      add(this.add.rectangle(cx, h * 0.42, 520, 260, 0x120f28, 0.94).setStrokeStyle(3, 0x6a4dff).setScrollFactor(0).setDepth(D));
       const me = this.snap?.players.find((p) => p.i === this.room.sessionId);
       const winner = this.snap?.winner ?? -1;
       const myTeam = me?.t ?? 0;
       const title = winner < 0 ? 'ÉGALITÉ' : winner === myTeam ? 'VICTOIRE !' : 'DÉFAITE';
       const color = winner < 0 ? '#d8d8ff' : winner === myTeam ? '#ffcf33' : '#ff6b5e';
-      const sub =
-        this.mode === 'battle-royale'
-          ? winner < 0
-            ? 'Personne n’a survécu'
-            : `Survivant : ${this.snap?.players.find((p) => p.t === winner)?.n ?? '—'}`
-          : `${TEAM.labelA}  ${this.snap?.score[0] ?? 0} — ${this.snap?.score[1] ?? 0}  ${TEAM.labelB}`;
-      add(this.add.text(cx, h * 0.42 - 78, title, { fontFamily: 'system-ui, sans-serif', fontSize: '44px', fontStyle: 'bold', color }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
-      add(this.add.text(cx, h * 0.42 - 22, sub, { fontFamily: 'system-ui, sans-serif', fontSize: '22px', color: '#d8d8ff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
-      this.overlayButtons.push(this.uiButton(cx - 130, h * 0.42 + 60, 220, 58, 'REVANCHE', 0x2f8f5a, () => this.room.send('rematch')));
-      this.overlayButtons.push(this.uiButton(cx + 130, h * 0.42 + 60, 220, 58, 'QUITTER', 0x3a3466, () => this.leave()));
+      const sub = this.isBR()
+        ? winner < 0
+          ? 'Personne n’a survécu'
+          : `Survivant : ${this.snap?.players.find((p) => p.t === winner)?.n ?? '—'}`
+        : `${TEAM.labelA}  ${this.snap?.score[0] ?? 0} — ${this.snap?.score[1] ?? 0}  ${TEAM.labelB}`;
+      const cy = h * 0.42;
+      add(this.add.rectangle(cx, cy, 560, 360, 0x120f28, 0.94).setStrokeStyle(3, 0x6a4dff).setScrollFactor(0).setDepth(D));
+      add(this.add.text(cx, cy - 154, title, { fontFamily: 'system-ui, sans-serif', fontSize: '38px', fontStyle: 'bold', color }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+      add(this.add.text(cx, cy - 116, sub, { fontFamily: 'system-ui, sans-serif', fontSize: '19px', color: '#d8d8ff' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+      add(this.add.text(cx, cy - 86, '🏆 CLASSEMENT DE LA SESSION', { fontFamily: 'system-ui, sans-serif', fontSize: '15px', fontStyle: 'bold', color: '#ffcf33' }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+      this.boardText = add(this.add.text(cx, cy - 62, '', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#e8e8ff', align: 'left', lineSpacing: 5 }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(D + 1));
+      this.overlayButtons.push(this.uiButton(cx - 130, cy + 142, 220, 56, 'REVANCHE', 0x2f8f5a, () => this.room.send('rematch')));
+      this.overlayButtons.push(this.uiButton(cx + 130, cy + 142, 220, 56, 'QUITTER', 0x3a3466, () => this.leave()));
     }
+  }
+
+  /** Formatte le leaderboard cumulatif (rang, icône humain/bot, nom, score). */
+  private formatBoard(board: { n: string; s: number; b: boolean }[] | undefined, myName?: string): string {
+    if (!board || !board.length) return '(pas encore de score)';
+    return board
+      .slice(0, 6)
+      .map((e, i) => `${i + 1}.  ${e.b ? '🤖' : '👤'}  ${e.n}${!e.b && myName && e.n === myName ? ' (toi)' : ''}  —  ${e.s}`)
+      .join('\n');
   }
 
   private uiButton(x: number, y: number, w: number, h: number, label: string, color: number, onClick: () => void): Button {
@@ -444,18 +482,19 @@ export class OnlineGameScene extends Phaser.Scene {
       if (this.lobbyInfo) this.lobbyInfo.setText(`Départ auto dans ${Math.ceil(snap.timer / 1000)} s  ·  places vides = bots`);
       if (this.lobbyList) {
         const humans = snap.players.filter((p) => !p.bot);
-        const marker = (p: SnapPlayer) => (this.mode === 'battle-royale' ? '👤' : p.t === 0 ? '🔵' : '🔴');
+        const marker = (p: SnapPlayer) => (this.isBR() ? '👤' : p.t === 0 ? '🔵' : '🔴');
         const line = humans.map((p) => `${marker(p)} ${p.n}${p.i === me?.i ? ' (toi)' : ''}`).join('   ');
         this.lobbyList.setText(humans.length ? line : '(en attente de joueurs)');
       }
     }
+    if (this.boardText) this.boardText.setText(this.formatBoard(snap.board, me?.n));
   }
 
   // ---------- Spectateur (Battle Royale) ----------
 
   /** Si le joueur est éliminé en BR, suit un survivant ; renvoie sa position à observer. */
   private updateSpectator(snap: MatchSnapshot, me?: SnapPlayer): { x: number; y: number } | null {
-    const spectating = this.mode === 'battle-royale' && !!me && !me.al && snap.phase === 'playing';
+    const spectating = this.isBR() && !!me && !me.al && snap.phase === 'playing';
     if (!spectating) {
       this.teardownSpectate();
       return null;
@@ -506,7 +545,84 @@ export class OnlineGameScene extends Phaser.Scene {
   }
 
   private drawPitch(): void {
-    drawCartoonPitch(this, PITCH_NYXT, { soccer: this.mode !== 'battle-royale' });
+    if (this.isPortal()) {
+      this.drawPortalArena();
+      return;
+    }
+    drawCartoonPitch(this, PITCH_NYXT, { soccer: !this.isBR() });
+  }
+
+  /** Décor du tableau Portal en ligne : deux salles « labo », cloison, refuge. */
+  private drawPortalArena(): void {
+    const { width, height } = PORTAL_ARENA;
+    const main = PORTAL_REGIONS.main;
+    const refuge = PORTAL_REGIONS.refuge;
+    const cell = 120;
+
+    this.add.rectangle(main.x + main.w / 2, main.y + main.h / 2, main.w, main.h, 0x20233f).setDepth(0);
+    const g = this.add.graphics().setDepth(0);
+    g.lineStyle(2, 0x2f3360, 0.55);
+    for (let x = main.x; x <= main.x + main.w; x += cell) g.lineBetween(x, 0, x, height);
+    for (let y = 0; y <= height; y += cell) g.lineBetween(main.x, y, main.x + main.w, y);
+
+    this.add.rectangle(refuge.x + refuge.w / 2, refuge.y + refuge.h / 2, refuge.w, refuge.h, 0x263a44).setDepth(0);
+    const rg = this.add.graphics().setDepth(0);
+    rg.lineStyle(2, 0x3f5f6e, 0.5);
+    for (let x = refuge.x; x <= refuge.x + refuge.w; x += cell) rg.lineBetween(x, 0, x, height);
+    for (let y = 0; y <= height; y += cell) rg.lineBetween(refuge.x, y, refuge.x + refuge.w, y);
+    this.add.rectangle(refuge.x + refuge.w / 2, refuge.y + refuge.h / 2, refuge.w - 14, refuge.h - 14).setStrokeStyle(4, 0x46e0c0, 0.45).setDepth(1);
+    this.add.text(refuge.x + refuge.w / 2, 52, '🛡  REFUGE', { fontFamily: 'system-ui, sans-serif', fontSize: '30px', color: '#8ff0dc', fontStyle: 'bold' }).setOrigin(0.5).setDepth(1);
+
+    this.add.rectangle(width / 2, height / 2, width, height).setStrokeStyle(10, 0x5a6cff, 1).setDepth(7);
+
+    for (const b of PORTAL_ARENA.bushes) {
+      this.add.rectangle(b.x + b.w / 2, b.y + b.h / 2, b.w, b.h, 0x2fae57, 0.9).setStrokeStyle(3, 0x53d97b, 0.9).setDepth(8);
+      this.add.rectangle(b.x + b.w / 2, b.y + Math.min(12, b.h * 0.22), b.w - 8, Math.min(12, b.h * 0.24), 0x5fe08d, 0.9).setDepth(8);
+    }
+    for (const o of PORTAL_ARENA.obstacles) {
+      if (o.h >= height - 1) {
+        this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, 0x3a3f66).setStrokeStyle(4, 0x181b33, 1).setDepth(9);
+        const stripes = this.add.graphics().setDepth(9);
+        stripes.fillStyle(0xffcf33, 0.5);
+        for (let y = 0; y < height; y += 90) stripes.fillRect(o.x + 6, y + 30, o.w - 12, 30);
+      } else {
+        this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, 0x3c4a66).setStrokeStyle(4, 0x1b2540, 1).setDepth(9);
+        this.add.rectangle(o.x + o.w / 2, o.y + Math.min(12, o.h * 0.25), o.w - 8, Math.min(14, o.h * 0.28), 0x5f739b).setDepth(9);
+      }
+    }
+  }
+
+  /** (Portal) Voiles de neurotoxine (grande salle / refuge) + anneaux de portails. */
+  private renderPortalFx(snap: MatchSnapshot): void {
+    const main = PORTAL_REGIONS.main;
+    const refuge = PORTAL_REGIONS.refuge;
+    const pulse = 0.85 + 0.15 * Math.sin(this.fxTime / 300);
+    const gas = snap.gas ?? { m: 0, r: 0 };
+
+    const gm = this.gasGfx;
+    gm.clear();
+    const mainA = Math.min(0.5, gas.m / 120) * pulse;
+    if (mainA > 0.01) gm.fillStyle(COLORS.poison, mainA).fillRect(main.x, main.y, main.w, main.h);
+    const refA = Math.min(0.5, gas.r / 120) * pulse;
+    if (refA > 0.01) gm.fillStyle(COLORS.poison, refA).fillRect(refuge.x, refuge.y, refuge.w, refuge.h);
+
+    const gp = this.portalGfx;
+    gp.clear();
+    const spin = this.fxTime / 500;
+    for (const ep of snap.portals ?? []) {
+      const rr = 30 + 3 * Math.sin(this.fxTime / 200 + ep.x);
+      gp.fillStyle(ep.c, 0.16).fillCircle(ep.x, ep.y, rr + 10);
+      gp.fillStyle(0x0b0b1a, 0.82).fillCircle(ep.x, ep.y, rr - 6);
+      gp.lineStyle(6, ep.c, 0.95).strokeCircle(ep.x, ep.y, rr);
+      gp.lineStyle(2, 0xffffff, 0.75).strokeCircle(ep.x, ep.y, rr - 8);
+      gp.lineStyle(3, ep.c, 0.9);
+      for (let k = 0; k < 3; k++) {
+        const a0 = spin * 2 + (k * TAU) / 3;
+        gp.beginPath();
+        gp.arc(ep.x, ep.y, rr - 12, a0, a0 + 1.15);
+        gp.strokePath();
+      }
+    }
   }
 
   /** (Battle Royale) Zone sûre : halo léger + anneau vif à la limite. */
@@ -539,8 +655,17 @@ export class OnlineGameScene extends Phaser.Scene {
 
   /** (Battle Royale) Voile rouge quand le joueur local est hors de la zone. */
   private updateDanger(snap: MatchSnapshot, me?: SnapPlayer): void {
-    const z = snap.zone;
-    const outside = !!z && !!me && me.al && snap.phase === 'playing' && Math.hypot(this.predX - z.x, this.predY - z.y) > z.r;
+    let outside = false;
+    if (me && me.al && snap.phase === 'playing') {
+      if (this.isPortal()) {
+        const gas = snap.gas ?? { m: 0, r: 0 };
+        const inRefuge = this.predX >= PORTAL_REGIONS.refugeMinX;
+        outside = (inRefuge ? gas.r : gas.m) > 0;
+      } else {
+        const z = snap.zone;
+        outside = !!z && Math.hypot(this.predX - z.x, this.predY - z.y) > z.r;
+      }
+    }
     this.dangerVignette.alpha = Phaser.Math.Linear(this.dangerVignette.alpha, outside ? 0.28 : 0, 0.15);
   }
 }

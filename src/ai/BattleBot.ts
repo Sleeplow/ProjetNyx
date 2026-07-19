@@ -19,6 +19,16 @@ interface CubeView {
   alive: boolean;
 }
 
+/**
+ * Stratégie de « danger » alternative à la zone (tableau Portal) : l'IA fuit la
+ * neurotoxine vers un portail vert / le refuge au lieu de rentrer dans un cercle.
+ */
+export interface DangerView {
+  inDanger: (x: number, y: number) => boolean;
+  retreat: (x: number, y: number) => { x: number; y: number } | null;
+  wander: (x: number, y: number) => { x: number; y: number };
+}
+
 export interface BattleWorld {
   all: BattleActor[];
   cubes: CubeView[];
@@ -26,6 +36,8 @@ export interface BattleWorld {
   obstacles: Rect[];
   width: number;
   height: number;
+  /** Portal : remplace la logique de zone par une fuite vers les portails. */
+  danger?: DangerView;
 }
 
 function norm(x: number, y: number): { x: number; y: number } {
@@ -35,11 +47,17 @@ function norm(x: number, y: number): { x: number; y: number } {
 
 /**
  * IA de Battle Royale (chacun pour soi), pure et sans Phaser. Priorités :
- * rester dans la zone > fuir à bas PV en tirant > traquer l'ennemi le plus
- * proche (approche puis kite) > ramasser un cube s'il n'y a pas d'ennemi.
+ * rester en sécurité (zone OU refuge via portail vert) > fuir à bas PV en tirant
+ * > traquer l'ennemi le plus proche (approche puis kite) > ramasser un cube.
  */
 export class BattleBot {
-  update(self: BattleActor, world: BattleWorld, _dtMs: number): InputState {
+  // Point d'errance mémorisé (rafraîchi périodiquement, pas chaque frame).
+  private wx = 0;
+  private wy = 0;
+  private wanderMs = 0;
+  private seeded = false;
+
+  update(self: BattleActor, world: BattleWorld, dtMs: number): InputState {
     const inp = emptyInput();
     inp.aimX = Math.cos(self.aimAngle);
     inp.aimY = Math.sin(self.aimAngle);
@@ -56,19 +74,41 @@ export class BattleBot {
       }
     }
 
-    const cx = world.zone.x;
-    const cy = world.zone.y;
-    const distZone = Math.hypot(self.x - cx, self.y - cy);
-    const outside = distZone > world.zone.r - 50;
-    const lowHp = self.healthRatio < 0.3;
     const range = self.def.attack.range;
+    const lowHp = self.healthRatio < 0.3;
 
-    const move = (dx: number, dy: number) => {
+    // Sécurité : zone qui rétrécit (classic) OU neurotoxine + portails (Portal).
+    let outside = false;
+    let retreat: { x: number; y: number } | null = null;
+    if (world.danger) {
+      if (world.danger.inDanger(self.x, self.y)) {
+        retreat = world.danger.retreat(self.x, self.y);
+        outside = retreat !== null; // « en danger » seulement si on a où fuir
+      }
+    } else {
+      const distZone = Math.hypot(self.x - world.zone.x, self.y - world.zone.y);
+      if (distZone > world.zone.r - 50) {
+        outside = true;
+        retreat = { x: world.zone.x, y: world.zone.y };
+      }
+    }
+
+    // Point d'errance mémorisé (évite le jitter quand danger.wander() est aléatoire).
+    this.wanderMs -= dtMs;
+    if (!this.seeded || this.wanderMs <= 0) {
+      const w = world.danger ? world.danger.wander(self.x, self.y) : { x: world.zone.x, y: world.zone.y };
+      this.wx = w.x;
+      this.wy = w.y;
+      this.wanderMs = 1000;
+      this.seeded = true;
+    }
+
+    const move = (dx: number, dy: number): void => {
       const n = norm(dx, dy);
       inp.moveX = n.x;
       inp.moveY = n.y;
     };
-    const shootAt = (t: BattleActor) => {
+    const shootAt = (t: BattleActor): void => {
       inp.aimX = t.x - self.x;
       inp.aimY = t.y - self.y;
       inp.attack = true;
@@ -76,8 +116,8 @@ export class BattleBot {
       if (self.ultReady) inp.ultimate = true;
     };
 
-    if (outside) {
-      move(cx - self.x, cy - self.y); // revenir dans la zone
+    if (outside && retreat) {
+      move(retreat.x - self.x, retreat.y - self.y); // fuir vers la sécurité (le tir reste actif)
       if (foe && fd < range) shootAt(foe);
     } else if (lowHp && foe) {
       move(self.x - foe.x, self.y - foe.y); // fuir
@@ -87,7 +127,7 @@ export class BattleBot {
       else if (fd < range * 0.4) move(self.x - foe.x, self.y - foe.y); // kite
       if (fd < range) shootAt(foe);
     } else {
-      // Pas d'ennemi : ramasser le cube le plus proche, sinon rester au centre.
+      // Pas d'ennemi : ramasser le cube le plus proche, sinon rejoindre le point sûr.
       let cube: CubeView | null = null;
       let cd = Infinity;
       for (const q of world.cubes) {
@@ -99,7 +139,7 @@ export class BattleBot {
         }
       }
       if (cube) move(cube.x - self.x, cube.y - self.y);
-      else if (distZone > 80) move(cx - self.x, cy - self.y);
+      else if (Math.hypot(this.wx - self.x, this.wy - self.y) > 80) move(this.wx - self.x, this.wy - self.y);
     }
 
     return inp;

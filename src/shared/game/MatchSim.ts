@@ -1,6 +1,9 @@
-import type { InputState, ZarekDef } from '../../core/types';
+import type { InputState, ZarekDef, MapDef, Rect } from '../../core/types';
 import { emptyInput } from '../../core/types';
 import { PITCH_NYXT } from '../../maps/pitchNyxt';
+import { PORTAL_ARENA, PORTAL_REGIONS, PORTAL_PAIRS, PORTAL_CFG, NEURO_CFG, PORTAL_SPAWN_RING } from '../../maps/portalArena';
+import { NeurotoxinField } from './neurotoxin';
+import { PortalSystem } from './portals';
 import { BALL, SOCCER } from '../../config/soccer';
 import { COLORS, REGEN, ZONE, POWER_CUBE } from '../../config/constants';
 import { ZAREKS, ZAREK_BY_ID, getZarek } from '../../zareks/registry';
@@ -8,7 +11,7 @@ import { SoccerBot, type SoccerWorld } from '../../ai/SoccerBot';
 import { BattleBot, type BattleWorld } from '../../ai/BattleBot';
 import { clamp, dist, normalize, resolveCircleRect, circleHitsRect, pointInRect } from '../../core/geometry';
 
-export type OnlineMode = 'brawl-ball' | 'battle-royale';
+export type OnlineMode = 'brawl-ball' | 'battle-royale' | 'battle-royale-portal';
 import { resolveChain } from './chain';
 import type { MatchPhase, MatchSnapshot, FxEvent, SnapPlayer } from './snapshot';
 
@@ -24,10 +27,13 @@ const OBS = MAP.obstacles;
 // Battle Royale en ligne (chacun pour soi).
 const BR_PLAYERS = 6;
 const BR_MATCH_MS = 180000; // filet de sécurité ; le dernier survivant termine avant
-const ZONE_CENTER = { x: W / 2, y: H / 2 };
-const ZONE_INIT = Math.hypot(W / 2, H / 2) + 60; // couvre l'arène au départ
 const ZONE_MIN = 240;
 const BR_SHRINK_MS = 78000; // durée de rétrécissement après le délai initial
+const TELEPORT_INVULN_MS = 1200; // répit d'invincibilité à la sortie d'un portail (Portal)
+
+// NB : W / H / OBS ci-dessus restent le TERRAIN (utilisés par SimBall, foot only).
+// L'arène de la simulation est configurable par mode (voir les champs d'instance
+// this.W / this.H / this.OBS, réglés dans le constructeur selon le mode).
 
 /** Cube de power-up au sol (Battle Royale), pur. */
 class SimCube {
@@ -48,6 +54,8 @@ class SimCombatant {
   ultCharge = 0;
   slowTimer = 0;
   slowFactor = 1;
+  /** Invincibilité restante (ms) — bref répit à la sortie d'un portail (Portal). */
+  invulnMs = 0;
   kbX = 0;
   kbY = 0;
   sinceCombatMs = 0;
@@ -95,8 +103,12 @@ class SimCombatant {
     return this.ultCharge >= 100;
   }
 
+  grantInvuln(ms: number): void {
+    this.invulnMs = Math.max(this.invulnMs, ms);
+  }
+
   takeDamage(amount: number): number {
-    if (!this.alive) return 0;
+    if (!this.alive || this.invulnMs > 0) return 0;
     if (amount > 0) this.sinceCombatMs = 0;
     const before = this.health;
     this.health = Math.max(0, this.health - amount);
@@ -132,6 +144,7 @@ class SimCombatant {
   tickTimers(dtMs: number): void {
     if (this.reloadTimer > 0) this.reloadTimer -= dtMs;
     if (this.slowTimer > 0) this.slowTimer -= dtMs;
+    if (this.invulnMs > 0) this.invulnMs -= dtMs;
     this.sinceCombatMs += dtMs;
   }
   noteAttack(): void {
@@ -326,21 +339,99 @@ export class MatchSim {
   private hazards: SimHazard[] = [];
   private botSeq = 0;
 
+  // Arène de la simulation (configurable par mode : foot, BR classic, Portal).
+  private readonly W: number;
+  private readonly H: number;
+  private readonly OBS: Rect[];
+  private readonly zoneCenter: { x: number; y: number };
+  private readonly zoneInit: number;
+  // Tableau Portal (autoritatif) : neurotoxine + portails.
+  private readonly neuro?: NeurotoxinField;
+  private readonly portals?: PortalSystem;
+
   // Battle Royale
   private teamSeq = 0; // équipe unique par joueur en FFA
   private cubesArr: SimCube[] = [];
-  private zoneRadius = ZONE_INIT;
+  private zoneRadius = 0;
   private zoneElapsed = 0;
+  private brDeaths = 0; // nombre d'éliminés dans la manche (→ points de classement)
 
-  constructor(private mode: OnlineMode = 'brawl-ball') {}
+  // Leaderboard cumulatif de la session (SURVIT aux revanches). Clé stable :
+  // humains par sessionId, bots par nom (« Bot 1 »…).
+  private board = new Map<string, { name: string; score: number; isBot: boolean }>();
 
+  constructor(private mode: OnlineMode = 'brawl-ball') {
+    const arena: MapDef = this.isPortal ? PORTAL_ARENA : PITCH_NYXT.map;
+    this.W = arena.width;
+    this.H = arena.height;
+    this.OBS = arena.obstacles;
+    this.zoneCenter = { x: this.W / 2, y: this.H / 2 };
+    this.zoneInit = Math.hypot(this.W / 2, this.H / 2) + 60;
+    this.zoneRadius = this.zoneInit;
+    if (this.isPortal) {
+      this.neuro = new NeurotoxinField(NEURO_CFG);
+      this.portals = new PortalSystem(
+        PORTAL_PAIRS,
+        { main: PORTAL_REGIONS.main, refuge: PORTAL_REGIONS.refuge },
+        PORTAL_CFG,
+        (x, y, margin) => this.isFreeSpot(x, y, margin),
+      );
+    }
+  }
+
+  /** Les deux variantes de Battle Royale (classic + Portal). */
   private get isBR(): boolean {
-    return this.mode === 'battle-royale';
+    return this.mode !== 'brawl-ball';
+  }
+  private get isPortal(): boolean {
+    return this.mode === 'battle-royale-portal';
+  }
+
+  /** Emplacement libre (grande salle, hors obstacle) pour relocaliser les portails. */
+  private isFreeSpot(x: number, y: number, margin: number): boolean {
+    if (x < margin || y < margin || x > this.W - margin || y > this.H - margin) return false;
+    return !this.OBS.some((o) => circleHitsRect(x, y, margin, o));
   }
 
   private brSpawn(i: number, n: number): { x: number; y: number } {
     const a = (i / Math.max(1, n)) * Math.PI * 2 - Math.PI / 2;
-    return { x: ZONE_CENTER.x + Math.cos(a) * W * 0.34, y: ZONE_CENTER.y + Math.sin(a) * H * 0.32 };
+    if (this.isPortal) {
+      return { x: PORTAL_SPAWN_RING.cx + Math.cos(a) * PORTAL_SPAWN_RING.r, y: PORTAL_SPAWN_RING.cy + Math.sin(a) * PORTAL_SPAWN_RING.r };
+    }
+    return { x: this.zoneCenter.x + Math.cos(a) * this.W * 0.34, y: this.zoneCenter.y + Math.sin(a) * this.H * 0.32 };
+  }
+
+  // ---------- Leaderboard cumulatif ----------
+
+  /** Nom stable pour un bot (« Bot 1 », « Bot 2 »…), par ordre d'apparition. */
+  private nextBotName(): string {
+    return `Bot ${this.combatants.filter((c) => c.isBot).length + 1}`;
+  }
+
+  private boardKey(c: SimCombatant): string {
+    return c.isBot ? `bot:${c.name}` : `me:${c.id}`;
+  }
+
+  private awardBoard(c: SimCombatant, pts: number): void {
+    // Un joueur à 0 point est quand même inscrit (entrée créée avec score 0).
+    const k = this.boardKey(c);
+    const e = this.board.get(k) ?? { name: c.name, score: 0, isBot: c.isBot };
+    e.score += pts;
+    e.name = c.name;
+    e.isBot = c.isBot;
+    this.board.set(k, e);
+  }
+
+  /** Points de fin de manche (BR : classement ; foot : victoire/nul/défaite). */
+  private awardEndOfMatch(winnerTeam: number): void {
+    if (this.isBR) {
+      for (const c of this.combatants) if (c.alive) this.awardBoard(c, this.brDeaths);
+    } else {
+      for (const c of this.combatants) {
+        const pts = winnerTeam < 0 ? 1 : c.team === winnerTeam ? 3 : 0;
+        this.awardBoard(c, pts);
+      }
+    }
   }
 
   phase: MatchPhase = 'lobby';
@@ -436,14 +527,14 @@ export class MatchSim {
     const botId = `bot${this.botSeq++}`;
     if (this.isBR) {
       c.id = botId;
+      c.name = this.nextBotName();
       c.isBot = true;
-      c.name = 'Bot';
       this.bots.set(botId, new BattleBot());
     } else {
       if (this.ball.carrierId === c.id) this.ball.drop(PITCH_NYXT.centerX - c.x, PITCH_NYXT.centerY - c.y);
       this.reassignId(c, botId);
+      c.name = this.nextBotName();
       c.isBot = true;
-      c.name = 'Bot';
       this.bots.set(botId, new SoccerBot(spawnsFor(c.team)[0].role));
     }
     if (this.humanCount() === 0) this.resetToLobby();
@@ -492,7 +583,7 @@ export class MatchSim {
     this.ball.x = PITCH_NYXT.ballStart.x;
     this.ball.y = PITCH_NYXT.ballStart.y;
     this.cubesArr = [];
-    this.zoneRadius = ZONE_INIT;
+    this.zoneRadius = this.zoneInit;
     this.zoneElapsed = 0;
     for (const c of this.combatants) {
       c.cubes = 0;
@@ -519,7 +610,7 @@ export class MatchSim {
         const sp = spawnsFor(team)[members];
         const def = ZAREKS[Math.floor(Math.random() * ZAREKS.length)];
         const id = `bot${this.botSeq++}`;
-        this.combatants.push(new SimCombatant(id, 'Bot', team, def.id, def, true, sp.x, sp.y));
+        this.combatants.push(new SimCombatant(id, this.nextBotName(), team, def.id, def, true, sp.x, sp.y));
         this.bots.set(id, new SoccerBot(sp.role));
         members++;
       }
@@ -540,7 +631,7 @@ export class MatchSim {
     while (this.combatants.length < BR_PLAYERS) {
       const def = ZAREKS[Math.floor(Math.random() * ZAREKS.length)];
       const id = `bot${this.botSeq++}`;
-      this.combatants.push(new SimCombatant(id, 'Bot', this.teamSeq++, def.id, def, true, 0, 0));
+      this.combatants.push(new SimCombatant(id, this.nextBotName(), this.teamSeq++, def.id, def, true, 0, 0));
       this.bots.set(id, new BattleBot());
     }
     const n = this.combatants.length;
@@ -554,8 +645,10 @@ export class MatchSim {
       c.ultCharge = 0;
     });
     this.spawnCubes();
-    this.zoneRadius = ZONE_INIT;
+    this.zoneRadius = this.zoneInit;
     this.zoneElapsed = 0;
+    this.brDeaths = 0;
+    if (this.neuro) this.neuro.elapsed = 0; // la neurotoxine repart à chaque manche
     this.winner = -1;
     this.projectiles = [];
     this.hazards = [];
@@ -565,13 +658,16 @@ export class MatchSim {
 
   private spawnCubes(): void {
     this.cubesArr = [];
+    // Portal : les cubes n'apparaissent que dans la grande salle (pas le refuge).
+    const region = this.isPortal ? PORTAL_REGIONS.main : { x: 0, y: 0, w: this.W, h: this.H };
+    const m = 120;
     let placed = 0;
     let tries = 0;
     while (placed < POWER_CUBE.initialCount && tries < 300) {
       tries++;
-      const x = 120 + Math.random() * (W - 240);
-      const y = 120 + Math.random() * (H - 240);
-      if (OBS.some((o) => circleHitsRect(x, y, POWER_CUBE.radius + 8, o))) continue;
+      const x = region.x + m + Math.random() * (region.w - m * 2);
+      const y = region.y + m + Math.random() * (region.h - m * 2);
+      if (this.OBS.some((o) => circleHitsRect(x, y, POWER_CUBE.radius + 8, o))) continue;
       this.cubesArr.push(new SimCube(x, y));
       placed++;
     }
@@ -580,11 +676,21 @@ export class MatchSim {
   private updateZone(dtMs: number, dtSec: number): void {
     this.zoneElapsed += dtMs;
     const t = clamp((this.zoneElapsed - ZONE.startDelayMs) / BR_SHRINK_MS, 0, 1);
-    this.zoneRadius = ZONE_INIT + (ZONE_MIN - ZONE_INIT) * t;
+    this.zoneRadius = this.zoneInit + (ZONE_MIN - this.zoneInit) * t;
     const dps = ZONE.baseDamagePerSecond + t * 18;
     for (const c of this.combatants) {
       if (!c.alive) continue;
-      if (dist(c.x, c.y, ZONE_CENTER.x, ZONE_CENTER.y) > this.zoneRadius) c.takeDamage(dps * dtSec);
+      if (dist(c.x, c.y, this.zoneCenter.x, this.zoneCenter.y) > this.zoneRadius) c.takeDamage(dps * dtSec);
+    }
+  }
+
+  /** Neurotoxine (Portal) : dégâts par région (gaz déjà avancé avant le déplacement). */
+  private applyNeuroDamage(dtSec: number): void {
+    const neuro = this.neuro!;
+    for (const c of this.combatants) {
+      if (!c.alive) continue;
+      const d = neuro.dpsAt(c.x, c.y);
+      if (d > 0) c.takeDamage(d * dtSec);
     }
   }
 
@@ -606,10 +712,31 @@ export class MatchSim {
     return {
       all: this.combatants,
       cubes: this.cubesArr,
-      zone: { x: ZONE_CENTER.x, y: ZONE_CENTER.y, r: this.zoneRadius },
-      obstacles: OBS,
-      width: W,
-      height: H,
+      zone: { x: this.zoneCenter.x, y: this.zoneCenter.y, r: this.zoneRadius },
+      obstacles: this.OBS,
+      width: this.W,
+      height: this.H,
+      danger: this.isPortal ? this.buildDanger() : undefined,
+    };
+  }
+
+  /** Stratégie de fuite pour l'IA en Portal : neurotoxine → portail vert / refuge. */
+  private buildDanger(): NonNullable<BattleWorld['danger']> {
+    const neuro = this.neuro!;
+    const portals = this.portals!;
+    return {
+      inDanger: (x, y) => neuro.isDanger(x, y),
+      retreat: (x, y) => {
+        if (!neuro.active) return null;
+        if (neuro.isRefuge(x)) return null;
+        if (neuro.mainDps <= 0) return null;
+        return portals.nearestGreenTo(x, y, 'main');
+      },
+      wander: (x) => {
+        const r = neuro.isRefuge(x) ? PORTAL_REGIONS.refuge : PORTAL_REGIONS.main;
+        const m = 100;
+        return { x: r.x + m + Math.random() * (r.w - m * 2), y: r.y + m + Math.random() * (r.h - m * 2) };
+      },
     };
   }
 
@@ -651,6 +778,7 @@ export class MatchSim {
     this.winner = winnerTeam;
     this.phase = 'ended';
     this.timer = 0;
+    this.awardEndOfMatch(winnerTeam);
   }
 
   // ---------- Boucle ----------
@@ -682,8 +810,15 @@ export class MatchSim {
       case 'playing':
         if (this.isBR) {
           this.matchClock -= dtMs;
-          this.simulate(dtMs, dtSec);
-          this.updateZone(dtMs, dtSec);
+          if (this.isPortal) {
+            this.neuro!.update(dtMs);
+            this.portals!.update(dtMs);
+            this.simulate(dtMs, dtSec); // le déplacement inclut la téléportation
+            this.applyNeuroDamage(dtSec);
+          } else {
+            this.simulate(dtMs, dtSec);
+            this.updateZone(dtMs, dtSec);
+          }
           this.updateCubes();
           this.checkSurvivors();
           if (this.phase === 'playing' && this.matchClock <= 0) {
@@ -731,9 +866,9 @@ export class MatchSim {
       ball: { x: this.ball.x, y: this.ball.y, carrierId: this.ball.carrierId, free: this.ball.free },
       leftGoal: { x: PITCH_NYXT.leftGoal.centerX, y: PITCH_NYXT.leftGoal.centerY },
       rightGoal: { x: PITCH_NYXT.rightGoal.centerX, y: PITCH_NYXT.rightGoal.centerY },
-      obstacles: OBS,
-      width: W,
-      height: H,
+      obstacles: this.OBS,
+      width: this.W,
+      height: this.H,
       frozen: false,
     };
   }
@@ -768,19 +903,31 @@ export class MatchSim {
       let ny = c.y + mv.y * spd * dtSec + c.kbY * dtSec;
       c.kbX *= kbDecay;
       c.kbY *= kbDecay;
-      nx = clamp(nx, c.def.radius, W - c.def.radius);
-      ny = clamp(ny, c.def.radius, H - c.def.radius);
-      for (const ob of OBS) {
+      nx = clamp(nx, c.def.radius, this.W - c.def.radius);
+      ny = clamp(ny, c.def.radius, this.H - c.def.radius);
+      for (const ob of this.OBS) {
         const res = resolveCircleRect(nx, ny, c.def.radius, ob);
         if (res) {
           nx = res.x;
           ny = res.y;
         }
       }
-      c.x = clamp(nx, c.def.radius, W - c.def.radius);
-      c.y = clamp(ny, c.def.radius, H - c.def.radius);
+      c.x = clamp(nx, c.def.radius, this.W - c.def.radius);
+      c.y = clamp(ny, c.def.radius, this.H - c.def.radius);
     }
     this.separate();
+
+    // Portal : marcher sur un portail téléporte (+ bref répit d'invincibilité).
+    if (this.isPortal) {
+      for (const c of this.combatants) {
+        if (!c.alive) continue;
+        if (this.portals!.tryTeleport(c)) {
+          c.x = clamp(c.x, c.def.radius, this.W - c.def.radius);
+          c.y = clamp(c.y, c.def.radius, this.H - c.def.radius);
+          c.grantInvuln(TELEPORT_INVULN_MS);
+        }
+      }
+    }
 
     // 3) Actions.
     for (const c of this.combatants) {
@@ -827,10 +974,10 @@ export class MatchSim {
           const push = (minD - d) / 2;
           const nx = dx / d;
           const ny = dy / d;
-          a.x = clamp(a.x - nx * push, a.def.radius, W - a.def.radius);
-          a.y = clamp(a.y - ny * push, a.def.radius, H - a.def.radius);
-          b.x = clamp(b.x + nx * push, b.def.radius, W - b.def.radius);
-          b.y = clamp(b.y + ny * push, b.def.radius, H - b.def.radius);
+          a.x = clamp(a.x - nx * push, a.def.radius, this.W - a.def.radius);
+          a.y = clamp(a.y - ny * push, a.def.radius, this.H - a.def.radius);
+          b.x = clamp(b.x + nx * push, b.def.radius, this.W - b.def.radius);
+          b.y = clamp(b.y + ny * push, b.def.radius, this.H - b.def.radius);
         }
       }
     }
@@ -994,11 +1141,11 @@ export class MatchSim {
       const ownerTeam = this.teamOf(p.ownerId);
 
       let landed = !p.alive;
-      if (p.x < 0 || p.y < 0 || p.x > W || p.y > H) {
+      if (p.x < 0 || p.y < 0 || p.x > this.W || p.y > this.H) {
         p.kill();
         landed = true;
       } else {
-        for (const ob of OBS) {
+        for (const ob of this.OBS) {
           if (circleHitsRect(p.x, p.y, p.radius, ob)) {
             p.kill();
             landed = true;
@@ -1101,6 +1248,8 @@ export class MatchSim {
   private handleDeath(c: SimCombatant): void {
     this.fx.push({ k: 'death', x: c.x, y: c.y, c: c.def.color });
     if (this.isBR) {
+      this.awardBoard(c, this.brDeaths); // points = nombre de joueurs surclassés
+      this.brDeaths++;
       c.eliminated = true; // pas de réapparition en Battle Royale
       return;
     }
@@ -1142,9 +1291,18 @@ export class MatchSim {
       mode: this.mode,
     };
     if (this.isBR) {
-      snap.zone = { x: ZONE_CENTER.x, y: ZONE_CENTER.y, r: Math.round(this.zoneRadius) };
       snap.cubes = this.cubesArr.filter((q) => q.alive).map((q) => ({ x: Math.round(q.x), y: Math.round(q.y), r: POWER_CUBE.radius, c: COLORS.powerCube }));
       snap.alive = this.combatants.filter((c) => c.alive).length;
+      if (this.isPortal) {
+        // Portal : positions des portails (itinérants) + intensité du gaz par salle.
+        snap.portals = this.portals!.endpoints.map((e) => ({ x: Math.round(e.x), y: Math.round(e.y), c: e.colorHex }));
+        snap.gas = { m: Math.round(this.neuro!.mainDps), r: Math.round(this.neuro!.refugeDps) };
+      } else {
+        snap.zone = { x: this.zoneCenter.x, y: this.zoneCenter.y, r: Math.round(this.zoneRadius) };
+      }
+    }
+    if (this.board.size) {
+      snap.board = [...this.board.values()].sort((a, b) => b.score - a.score).map((e) => ({ n: e.name, s: e.score, b: e.isBot }));
     }
     return snap;
   }

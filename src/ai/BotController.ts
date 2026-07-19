@@ -4,6 +4,22 @@ import { emptyInput } from '../core/types';
 import { AI, BUSH } from '../config/constants';
 import { dist, normalize } from '../core/geometry';
 
+/**
+ * Stratégie de « danger » alternative à la zone qui rétrécit (tableau Portal).
+ * Fournie par la scène : l'IA fuit vers un portail vert / le refuge au lieu de
+ * rentrer vers le centre d'un cercle.
+ */
+export interface DangerStrategy {
+  /** Le gaz a-t-il commencé quelque part ? */
+  active: boolean;
+  /** Cette position subit-elle des dégâts (gaz) en ce moment ? */
+  inDanger: (x: number, y: number) => boolean;
+  /** Où fuir (portail vert / refuge), ou null si déjà sûr — ou plus rien à faire. */
+  retreat: (x: number, y: number) => { x: number; y: number } | null;
+  /** Point d'errance « sûr » selon la position courante (refuge OU grande salle). */
+  wander: (x: number, y: number) => { x: number; y: number };
+}
+
 /** Ce dont l'IA a besoin pour décider (fourni par la scène chaque frame). */
 export interface BotWorld {
   /** Tous les combattants vivants (self inclus). */
@@ -13,6 +29,8 @@ export interface BotWorld {
   zoneCenterX: number;
   zoneCenterY: number;
   zoneRadius: number;
+  /** Tableau Portal : remplace la logique de zone par une fuite vers les portails. */
+  danger?: DangerStrategy;
 }
 
 /**
@@ -52,8 +70,9 @@ export class BotController {
     if (!self.alive) return input;
 
     if (!this.seeded) {
-      this.wanderX = world.zoneCenterX;
-      this.wanderY = world.zoneCenterY;
+      const w = world.danger ? world.danger.wander(self.x, self.y) : { x: world.zoneCenterX, y: world.zoneCenterY };
+      this.wanderX = w.x;
+      this.wanderY = w.y;
       this.seeded = true;
     }
 
@@ -62,17 +81,29 @@ export class BotController {
       this.rethink = AI.rethinkMs;
       this.chooseTarget(self, world);
       if (this.rand() < 0.3) this.strafeSign *= -1;
-      this.pickWander(world);
+      if (world.danger) {
+        const w = world.danger.wander(self.x, self.y);
+        this.wanderX = w.x;
+        this.wanderY = w.y;
+      } else {
+        this.pickWander(world);
+      }
     }
 
     const target = this.targetId ? world.all.find((c) => c.id === this.targetId && c.alive) : undefined;
 
-    // 1) Sécurité de zone. En général on rentre si on est hors du cercle sûr,
-    //    SAUF si un cube proche du bord vaut le détour (et qu'on a assez de vie).
-    const dCenter = dist(self.x, self.y, world.zoneCenterX, world.zoneCenterY);
-    const safeR = Math.max(60, world.zoneRadius - AI.zoneSafetyMargin);
-    const outside = dCenter > safeR;
-    const worthyCube = self.healthRatio > 0.5 ? this.outOfZoneCube(self, world) : null;
+    // 1) Sécurité. Classique : rentrer dans le cercle sûr (sauf cube au bord).
+    //    Portal : fuir la neurotoxine vers un portail vert / le refuge.
+    let outside: boolean;
+    let worthyCube: { x: number; y: number } | null = null;
+    if (world.danger) {
+      outside = world.danger.inDanger(self.x, self.y);
+    } else {
+      const dCenter = dist(self.x, self.y, world.zoneCenterX, world.zoneCenterY);
+      const safeR = Math.max(60, world.zoneRadius - AI.zoneSafetyMargin);
+      outside = dCenter > safeR;
+      worthyCube = self.healthRatio > 0.5 ? this.outOfZoneCube(self, world) : null;
+    }
 
     let moveX = 0;
     let moveY = 0;
@@ -126,7 +157,16 @@ export class BotController {
     }
 
     if (outside) {
-      if (worthyCube) {
+      if (world.danger) {
+        // Portal : courir vers un portail vert / le refuge (le tir reste actif).
+        const r = world.danger.retreat(self.x, self.y);
+        if (r) {
+          const to = normalize(r.x - self.x, r.y - self.y);
+          moveX = to.x;
+          moveY = to.y;
+        }
+        // r == null : nulle part où fuir (refuge gazé aussi) → on garde le combat.
+      } else if (worthyCube) {
         // Bref détour dans le danger pour aller chercher un cube intéressant.
         const to = normalize(worthyCube.x - self.x, worthyCube.y - self.y);
         moveX = to.x;

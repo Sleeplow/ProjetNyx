@@ -1,16 +1,19 @@
 import Phaser from 'phaser';
-import type { InputState } from '../core/types';
+import type { InputState, MapDef } from '../core/types';
 import { emptyInput } from '../core/types';
 import { Combatant } from '../core/Combatant';
 import { Projectile } from '../core/Projectile';
 import { PowerCube } from '../core/PowerCube';
 import { HazardZone } from '../core/HazardZone';
 import { BattleRoyaleMode } from '../modes/battleRoyale';
-import { BotController, type BotWorld } from '../ai/BotController';
+import { BotController, type BotWorld, type DangerStrategy } from '../ai/BotController';
 import { PlayerController } from '../input/PlayerController';
 import { Hud } from '../ui/Hud';
 import { makeButton, type Button } from '../ui/widgets';
 import { ARENA_ROYALE } from '../maps/arenaRoyale';
+import { PORTAL_ARENA, PORTAL_REGIONS, PORTAL_PAIRS, PORTAL_CFG, NEURO_CFG, PORTAL_SPAWN_RING } from '../maps/portalArena';
+import { NeurotoxinField } from '../shared/game/neurotoxin';
+import { PortalSystem } from '../shared/game/portals';
 import { resolveChain } from '../shared/game/chain';
 import { drawChainBolt } from '../render/fx';
 import { ZAREKS, getZarek } from '../zareks/registry';
@@ -25,8 +28,16 @@ const TAU = Math.PI * 2;
  * fournis par les données ; ajouter du contenu ne touche pas cette boucle.
  */
 export class GameScene extends Phaser.Scene {
-  private map = ARENA_ROYALE;
+  private map: MapDef = ARENA_ROYALE;
   private mode!: BattleRoyaleMode;
+  // Tableau « Portal » : neurotoxine + portails (au lieu de la zone qui rétrécit).
+  private isPortal = false;
+  private neuro?: NeurotoxinField;
+  private portals?: PortalSystem;
+  private gasMainGfx?: Phaser.GameObjects.Graphics;
+  private gasRefugeGfx?: Phaser.GameObjects.Graphics;
+  private portalGfx?: Phaser.GameObjects.Graphics;
+  private fxTime = 0;
   private combatants: Combatant[] = [];
   private player!: Combatant;
   private bots = new Map<string, BotController>();
@@ -59,6 +70,8 @@ export class GameScene extends Phaser.Scene {
     // Réinitialisation complète (la scène est réutilisée entre les parties).
     this.selectedZarekId = data?.zarekId ?? ZAREKS[0].id;
     this.modeId = data?.modeId ?? 'battle-royale';
+    this.isPortal = this.modeId === 'battle-royale-portal';
+    this.map = this.isPortal ? PORTAL_ARENA : ARENA_ROYALE;
     this.combatants = [];
     this.projectiles = [];
     this.cubes = [];
@@ -71,12 +84,19 @@ export class GameScene extends Phaser.Scene {
     this.spectateTargetId = null;
     this.spectateBanner = undefined;
     this.spectateButtons = [];
+    this.neuro = undefined;
+    this.portals = undefined;
+    this.fxTime = 0;
 
     const { width, height } = this.map;
     this.cameras.main.setBounds(0, 0, width, height);
 
     this.drawArena();
-    this.mode = new BattleRoyaleMode(this, this.map);
+    if (this.isPortal) {
+      this.setupPortalMode();
+    } else {
+      this.mode = new BattleRoyaleMode(this, this.map);
+    }
     this.spawnCombatants();
     this.scatterCubes(POWER_CUBE.initialCount);
 
@@ -93,19 +113,122 @@ export class GameScene extends Phaser.Scene {
     // pointeur, ce qui casse la détection tactile du bouton ULT.
     this.cameras.main.setZoom(1);
 
-    this.hud.flash('BATTLE ROYALE !', '#ffcf33');
+    if (this.isPortal) this.hud.setWarningText('☣ NEUROTOXINE');
+    this.hud.flash(this.isPortal ? 'CHAMBRE NYXT — NEUROTOXINE !' : 'BATTLE ROYALE !', '#ffcf33');
 
     this.events.once('shutdown', () => {
       this.playerController.destroy();
       this.hud.destroy();
-      this.mode.destroy();
+      this.mode?.destroy();
+      this.gasMainGfx?.destroy();
+      this.gasRefugeGfx?.destroy();
+      this.portalGfx?.destroy();
       for (const b of this.spectateButtons) b.destroy();
     });
+  }
+
+  /** Crée la neurotoxine + les portails + les graphismes dédiés (tableau Portal). */
+  private setupPortalMode(): void {
+    this.neuro = new NeurotoxinField(NEURO_CFG);
+    this.portals = new PortalSystem(
+      PORTAL_PAIRS,
+      { main: PORTAL_REGIONS.main, refuge: PORTAL_REGIONS.refuge },
+      PORTAL_CFG,
+      (x, y, margin) => !this.isBlocked(x, y) && this.distToObstacles(x, y) > margin,
+    );
+    // Gaz : deux voiles verts (grande salle / refuge), opacité pilotée par les dégâts.
+    this.gasMainGfx = this.add.graphics().setDepth(12);
+    this.gasRefugeGfx = this.add.graphics().setDepth(12);
+    this.portalGfx = this.add.graphics().setDepth(13);
+  }
+
+  /** Distance approx. au bord d'obstacle le plus proche (pour placer les portails au large). */
+  private distToObstacles(x: number, y: number): number {
+    let best = Infinity;
+    for (const o of this.map.obstacles) {
+      const nx = clamp(x, o.x, o.x + o.w);
+      const ny = clamp(y, o.y, o.y + o.h);
+      best = Math.min(best, Math.hypot(x - nx, y - ny));
+    }
+    return best;
+  }
+
+  /** Stratégie de danger fournie à l'IA (Portal) : fuir la neurotoxine par les portails verts. */
+  private buildDanger(): DangerStrategy {
+    const neuro = this.neuro!;
+    const portals = this.portals!;
+    const main = PORTAL_REGIONS.main;
+    const refuge = PORTAL_REGIONS.refuge;
+    return {
+      active: neuro.active,
+      inDanger: (x, y) => neuro.isDanger(x, y),
+      retreat: (x, y) => {
+        if (!neuro.active) return null;
+        if (neuro.isRefuge(x)) return null; // refuge : rester (ou se battre si gazé)
+        if (neuro.mainDps <= 0) return null;
+        return portals.nearestGreenTo(x, y, 'main'); // marcher sur un vert → refuge
+      },
+      wander: (x) => {
+        const r = neuro.isRefuge(x) ? refuge : main;
+        const m = 100;
+        return { x: r.x + m + Math.random() * (r.w - m * 2), y: r.y + m + Math.random() * (r.h - m * 2) };
+      },
+    };
+  }
+
+  /** Dessine le gaz (voiles verts pulsés) + les portails (anneaux colorés animés). */
+  private renderPortalFx(): void {
+    const neuro = this.neuro!;
+    const main = PORTAL_REGIONS.main;
+    const refuge = PORTAL_REGIONS.refuge;
+    const pulse = 0.85 + 0.15 * Math.sin(this.fxTime / 300);
+
+    const gm = this.gasMainGfx!;
+    gm.clear();
+    const mainA = Math.min(0.5, neuro.mainDps / 120) * pulse;
+    if (mainA > 0.01) {
+      gm.fillStyle(COLORS.poison, mainA);
+      gm.fillRect(main.x, main.y, main.w, main.h);
+    }
+    const gr = this.gasRefugeGfx!;
+    gr.clear();
+    const refA = Math.min(0.5, neuro.refugeDps / 120) * pulse;
+    if (refA > 0.01) {
+      gr.fillStyle(COLORS.poison, refA);
+      gr.fillRect(refuge.x, refuge.y, refuge.w, refuge.h);
+    }
+
+    const gp = this.portalGfx!;
+    gp.clear();
+    const spin = this.portals!.spin;
+    for (const ep of this.portals!.endpoints) {
+      const rr = 30 + 3 * Math.sin(this.fxTime / 200 + ep.x);
+      gp.fillStyle(ep.colorHex, 0.16);
+      gp.fillCircle(ep.x, ep.y, rr + 10);
+      gp.fillStyle(0x0b0b1a, 0.82);
+      gp.fillCircle(ep.x, ep.y, rr - 6);
+      gp.lineStyle(6, ep.colorHex, 0.95);
+      gp.strokeCircle(ep.x, ep.y, rr);
+      gp.lineStyle(2, 0xffffff, 0.75);
+      gp.strokeCircle(ep.x, ep.y, rr - 8);
+      gp.lineStyle(3, ep.colorHex, 0.9);
+      for (let k = 0; k < 3; k++) {
+        const a0 = spin * 2 + (k * TAU) / 3;
+        gp.beginPath();
+        gp.arc(ep.x, ep.y, rr - 12, a0, a0 + 1.15);
+        gp.strokePath();
+      }
+    }
   }
 
   // ---------- Construction ----------
 
   private drawArena(): void {
+    if (this.isPortal) this.drawPortalArena();
+    else this.drawClassicArena();
+  }
+
+  private drawClassicArena(): void {
     const { width, height } = this.map;
 
     // Sol « damier » cartoon (deux indigos proches → texture douce, plus vive
@@ -136,11 +259,63 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Décor du tableau Portal : deux salles « labo », cloison métallique, refuge. */
+  private drawPortalArena(): void {
+    const { width, height } = this.map;
+    const main = PORTAL_REGIONS.main;
+    const refuge = PORTAL_REGIONS.refuge;
+    const cell = 120;
+
+    // Sol grande salle : panneaux « labo » sombres + grille fine.
+    this.add.rectangle(main.x + main.w / 2, main.y + main.h / 2, main.w, main.h, 0x20233f).setDepth(0);
+    const g = this.add.graphics().setDepth(0);
+    g.lineStyle(2, 0x2f3360, 0.55);
+    for (let x = main.x; x <= main.x + main.w; x += cell) g.lineBetween(x, 0, x, height);
+    for (let y = 0; y <= height; y += cell) g.lineBetween(main.x, y, main.x + main.w, y);
+
+    // Sol refuge : « salle blanche » plus claire, liseré cyan « sûr ».
+    this.add.rectangle(refuge.x + refuge.w / 2, refuge.y + refuge.h / 2, refuge.w, refuge.h, 0x263a44).setDepth(0);
+    const rg = this.add.graphics().setDepth(0);
+    rg.lineStyle(2, 0x3f5f6e, 0.5);
+    for (let x = refuge.x; x <= refuge.x + refuge.w; x += cell) rg.lineBetween(x, 0, x, height);
+    for (let y = 0; y <= height; y += cell) rg.lineBetween(refuge.x, y, refuge.x + refuge.w, y);
+    this.add.rectangle(refuge.x + refuge.w / 2, refuge.y + refuge.h / 2, refuge.w - 14, refuge.h - 14).setStrokeStyle(4, 0x46e0c0, 0.45).setDepth(1);
+    this.add
+      .text(refuge.x + refuge.w / 2, 52, '🛡  REFUGE', { fontFamily: 'system-ui, sans-serif', fontSize: '30px', color: '#8ff0dc', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setDepth(1);
+
+    // Bordure globale vive.
+    this.add.rectangle(width / 2, height / 2, width, height).setStrokeStyle(10, 0x5a6cff, 1).setDepth(7);
+
+    // Buissons (cachette) — même style cartoon.
+    for (const b of this.map.bushes) {
+      this.add.rectangle(b.x + b.w / 2, b.y + b.h / 2, b.w, b.h, 0x2fae57, 0.9).setStrokeStyle(3, 0x53d97b, 0.9).setDepth(8);
+      this.add.rectangle(b.x + b.w / 2, b.y + Math.min(12, b.h * 0.22), b.w - 8, Math.min(12, b.h * 0.24), 0x5fe08d, 0.9).setDepth(8);
+    }
+
+    // Obstacles : la cloison pleine (pleine hauteur) est stylisée comme un mur
+    // métallique avec chevrons ; les autres sont des blocs « labo ».
+    for (const o of this.map.obstacles) {
+      if (o.h >= height - 1) {
+        this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, 0x3a3f66).setStrokeStyle(4, 0x181b33, 1).setDepth(9);
+        const stripes = this.add.graphics().setDepth(9);
+        stripes.fillStyle(0xffcf33, 0.5);
+        for (let y = 0; y < height; y += 90) stripes.fillRect(o.x + 6, y + 30, o.w - 12, 30);
+        this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w - 16, o.h).setStrokeStyle(2, 0x7a80c8, 0.5).setDepth(9);
+      } else {
+        this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, 0x3c4a66).setStrokeStyle(4, 0x1b2540, 1).setDepth(9);
+        this.add.rectangle(o.x + o.w / 2, o.y + Math.min(12, o.h * 0.25), o.w - 8, Math.min(14, o.h * 0.28), 0x5f739b).setDepth(9);
+      }
+    }
+  }
+
   private spawnCombatants(): void {
     const { width, height } = this.map;
-    const cx = width / 2;
-    const cy = height / 2;
-    const spawnR = 620;
+    // Portal : tout le monde apparaît dans la grande salle (pas dans le refuge).
+    const cx = this.isPortal ? PORTAL_SPAWN_RING.cx : width / 2;
+    const cy = this.isPortal ? PORTAL_SPAWN_RING.cy : height / 2;
+    const spawnR = this.isPortal ? PORTAL_SPAWN_RING.r : 620;
     for (let i = 0; i < PLAYERS_PER_MATCH; i++) {
       const angle = (i / PLAYERS_PER_MATCH) * TAU - Math.PI / 2;
       const x = cx + Math.cos(angle) * spawnR;
@@ -160,6 +335,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private scatterCubes(count: number): void {
+    if (this.isPortal) {
+      this.scatterCubesPortal(count);
+      return;
+    }
     const { width } = this.map;
     const cx = width / 2;
     const cy = this.map.height / 2;
@@ -178,6 +357,21 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Portal : les cubes n'apparaissent que dans la grande salle (le refuge n'est pas un butin). */
+  private scatterCubesPortal(count: number): void {
+    const main = PORTAL_REGIONS.main;
+    let placed = 0;
+    let attempts = 0;
+    while (placed < count && attempts < count * 30) {
+      attempts++;
+      const x = main.x + 90 + Math.random() * (main.w - 180);
+      const y = main.y + 90 + Math.random() * (main.h - 180);
+      if (this.isBlocked(x, y)) continue;
+      this.cubes.push(new PowerCube(this, x, y));
+      placed++;
+    }
+  }
+
   private isBlocked(x: number, y: number): boolean {
     const margin = 40;
     if (x < margin || y < margin || x > this.map.width - margin || y > this.map.height - margin) return true;
@@ -190,14 +384,21 @@ export class GameScene extends Phaser.Scene {
     const dtMs = Math.min(delta, 50);
     const dtSec = dtMs / 1000;
 
-    this.mode.update(dtMs);
+    this.fxTime += dtMs;
+    if (this.isPortal) {
+      this.neuro!.update(dtMs);
+      this.portals!.update(dtMs);
+    } else {
+      this.mode.update(dtMs);
+    }
 
     const world: BotWorld = {
       all: this.combatants,
       cubes: this.cubes.filter((c) => c.alive).map((c) => ({ x: c.x, y: c.y })),
-      zoneCenterX: this.mode.centerX,
-      zoneCenterY: this.mode.centerY,
-      zoneRadius: this.mode.currentRadius,
+      zoneCenterX: this.isPortal ? PORTAL_SPAWN_RING.cx : this.mode.centerX,
+      zoneCenterY: this.isPortal ? PORTAL_SPAWN_RING.cy : this.mode.centerY,
+      zoneRadius: this.isPortal ? 999999 : this.mode.currentRadius,
+      danger: this.isPortal ? this.buildDanger() : undefined,
     };
 
     // 1) Entrées (joueur via contrôleur, NPC via IA — même couture).
@@ -241,6 +442,18 @@ export class GameScene extends Phaser.Scene {
 
     this.separateCombatants();
 
+    // 2bis) Portails : un combattant qui marche sur un portail est téléporté.
+    if (this.isPortal) {
+      for (const c of this.combatants) {
+        if (!c.alive) continue;
+        if (this.portals!.tryTeleport(c)) {
+          c.x = clamp(c.x, c.def.radius, this.map.width - c.def.radius);
+          c.y = clamp(c.y, c.def.radius, this.map.height - c.def.radius);
+          c.inBush = this.map.bushes.some((b) => pointInRect(c.x, c.y, b));
+        }
+      }
+    }
+
     // 3) Actions (attaque / ultimate).
     for (const c of this.combatants) {
       if (!c.alive) continue;
@@ -260,11 +473,20 @@ export class GameScene extends Phaser.Scene {
     // 5) Projectiles.
     this.updateProjectiles(dtSec);
 
-    // 6) Dégâts de zone.
-    const dps = this.mode.damagePerSecond;
-    if (dps > 0) {
+    // 6) Dégâts de zone / neurotoxine (dépend de la position → variable selon le tableau).
+    if (this.isPortal) {
+      const neuro = this.neuro!;
       for (const c of this.combatants) {
-        if (c.alive && this.mode.isOutside(c.x, c.y)) c.takeDamage(dps * dtSec);
+        if (!c.alive) continue;
+        const d = neuro.dpsAt(c.x, c.y);
+        if (d > 0) c.takeDamage(d * dtSec);
+      }
+    } else {
+      const dps = this.mode.damagePerSecond;
+      if (dps > 0) {
+        for (const c of this.combatants) {
+          if (c.alive && this.mode.isOutside(c.x, c.y)) c.takeDamage(dps * dtSec);
+        }
       }
     }
 
@@ -285,16 +507,19 @@ export class GameScene extends Phaser.Scene {
     this.cubes = this.cubes.filter((c) => c.alive);
 
     // 7bis) Cubes restés hors de la zone sûre : ils disparaissent après un délai.
-    for (const cube of this.cubes) {
-      if (this.mode.isOutside(cube.x, cube.y)) cube.tickOutside(dtMs);
-    }
-    this.cubes = this.cubes.filter((cube) => {
-      if (cube.expiredOutside) {
-        cube.destroy();
-        return false;
+    //       (Portal : les cubes restent dans la grande salle gazée — risque/récompense.)
+    if (!this.isPortal) {
+      for (const cube of this.cubes) {
+        if (this.mode.isOutside(cube.x, cube.y)) cube.tickOutside(dtMs);
       }
-      return true;
-    });
+      this.cubes = this.cubes.filter((cube) => {
+        if (cube.expiredOutside) {
+          cube.destroy();
+          return false;
+        }
+        return true;
+      });
+    }
 
     // 7ter) Régénération de vie hors combat (n'a pas tiré ni été touché récemment).
     for (const c of this.combatants) if (c.alive) c.regenerate(dtMs);
@@ -334,10 +559,14 @@ export class GameScene extends Phaser.Scene {
     this.camY = Phaser.Math.Linear(this.camY, camTarget.y, 0.1);
     this.cameras.main.centerOn(this.camX, this.camY);
 
+    // 10bis) Rendu neurotoxine + portails (tableau Portal).
+    if (this.isPortal) this.renderPortalFx();
+
     // 11) HUD.
     this.playerController.setUltReady(this.player.ultReady && this.player.alive);
     const survivors = this.combatants.filter((c) => c.alive).length;
-    this.hud.update(this.player, survivors, this.mode.isOutside(this.player.x, this.player.y), dtMs);
+    const danger = this.isPortal ? this.neuro!.isDanger(this.player.x, this.player.y) : this.mode.isOutside(this.player.x, this.player.y);
+    this.hud.update(this.player, survivors, danger, dtMs);
 
     // 12) Fin de partie.
     if (!this.ending) this.checkEnd();

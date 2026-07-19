@@ -39,12 +39,14 @@
         width: 100%;
         height: 100%;
       }
-      /* Nyxt se joue en PAYSAGE : sur un appareil tactile tenu en portrait, on
-         invite à tourner l'écran (couvre tout, le jeu reste actif derrière). */
+      /* Nyxt se joue en PAYSAGE : sur un TÉLÉPHONE tenu en portrait, on invite à
+         tourner l'écran (couvre tout, le jeu reste actif derrière).
+         `max-width: 540px` cible les téléphones : l'iPad (≥ 744 px en portrait)
+         et l'ordi ne sont jamais concernés. */
       #rotate {
         display: none;
       }
-      @media (orientation: portrait) and (pointer: coarse) {
+      @media (orientation: portrait) and (pointer: coarse) and (max-width: 540px) {
         #rotate {
           display: flex;
           position: fixed;

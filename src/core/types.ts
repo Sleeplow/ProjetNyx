@@ -94,6 +94,8 @@ export interface UltimateDef {
   chainJumpRange?: number;
   /** (kind 'chain') Nombre de rebonds de la méga-chaîne. */
   chainMaxJumps?: number;
+  /** (kind 'chain') Facteur de dégâts appliqué à CHAQUE rebond (0.75 = −25 %). */
+  chainFalloff?: number;
 }
 
 /** Définition complète d'un Zarek (personnage jouable). Pilotée par les données. */

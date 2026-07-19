@@ -34767,7 +34767,7 @@ var ASTRAPE = {
   id: "astrape",
   name: "Astrap\xE9",
   role: "mage",
-  description: "Mage foudre, fragile. Attaque : \xE9clair en cha\xEEne qui rebondit d\u2019ennemi en ennemi (d\xE9g\xE2ts d\xE9croissants). Ultimate : Surcharge \u2014 un \xE9clair g\xE9ant frappe plusieurs ennemis et les \xE9tourdit.",
+  description: "Mage foudre, fragile. Attaque : \xE9clair instantan\xE9 sur l\u2019ennemi le plus proche. Ultimate : Surcharge \u2014 \xE9clair en cha\xEEne qui rebondit jusqu\u2019\xE0 4 ennemis (\u221225 % par rebond) avec une longue port\xE9e.",
   color: 16765503,
   accent: 16774064,
   maxHealth: 850,
@@ -34775,36 +34775,39 @@ var ASTRAPE = {
   radius: 22,
   attack: {
     kind: "chain",
-    label: "\xC9clair en cha\xEEne",
+    label: "\xC9clair",
     reloadMs: 850,
     count: 1,
     spreadDeg: 0,
-    damage: 210,
+    damage: 140,
+    // besoin de ~2 coups de plus qu'avant pour un même total
     range: 360,
-    // portée de la première cible
+    // portée de la cible
     speed: 0,
     // instantané (pas de projectile)
     projRadius: 0,
-    chainJumpRange: 230,
-    chainMaxJumps: 2,
-    // 1ʳᵉ cible + 2 rebonds = 3 cibles
-    chainFalloff: 0.68
+    chainMaxJumps: 0
+    // touche uniquement le plus proche (aucun rebond)
   },
   ultimate: {
     kind: "chain",
     label: "Surcharge",
-    damage: 520,
-    radius: 340,
-    // portée de la première cible de l'ult
-    knockback: 200,
-    slowMs: 1300,
-    slowFactor: 0.5,
-    chainJumpRange: 320,
-    chainMaxJumps: 5
-    // jusqu'à 6 cibles
+    damage: 140,
+    // même dégât de base que l'attaque normale
+    radius: 440,
+    // portée de la première cible (plus longue que l'attaque)
+    knockback: 0,
+    slowMs: 900,
+    slowFactor: 0.6,
+    chainJumpRange: 400,
+    // rebonds longue distance
+    chainMaxJumps: 3,
+    // 1ʳᵉ cible + 3 rebonds = jusqu'à 4 cibles
+    chainFalloff: 0.75
+    // −25 % par cible touchée
   },
-  // Charge d'ult LENTE (ult puissant) — ~0,035 → il faut infliger ~2860 dégâts.
-  ultChargePerDamage: 0.035
+  // Charge d'ult au rythme normal (comme les autres mages).
+  ultChargePerDamage: 0.06
 };
 
 // src/zareks/registry.ts
@@ -35959,7 +35962,7 @@ var MatchSim = class {
       u.chainJumpRange ?? 300,
       u.chainMaxJumps ?? 5
     );
-    const dmg = u.damage * c.damageMult;
+    let dmg = u.damage * c.damageMult;
     this.fx.push({ k: "ult", x: c.x, y: c.y, r: 90, c: c.def.color });
     let px = c.x;
     let py = c.y;
@@ -35975,6 +35978,7 @@ var MatchSim = class {
       this.fx.push({ k: "hit", x: e.x, y: e.y, c: c.def.color });
       px = e.x;
       py = e.y;
+      dmg *= u.chainFalloff ?? 1;
     }
   }
   updateProjectiles(dtSec) {

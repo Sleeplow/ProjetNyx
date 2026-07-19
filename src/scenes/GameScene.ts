@@ -769,7 +769,7 @@ export class GameScene extends Phaser.Scene {
       u.chainJumpRange ?? 300,
       u.chainMaxJumps ?? 5,
     );
-    const dmg = u.damage * c.damageMult;
+    let dmg = u.damage * c.damageMult;
     let px = c.x;
     let py = c.y;
     for (const i of idx) {
@@ -784,6 +784,7 @@ export class GameScene extends Phaser.Scene {
       this.hitSpark(e.x, e.y, c.def.color);
       px = e.x;
       py = e.y;
+      dmg *= u.chainFalloff ?? 1; // −25 % par cible suivante
     }
     this.shockwaveFx(c.x, c.y, 90, c.def.color);
   }

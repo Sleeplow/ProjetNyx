@@ -57,6 +57,8 @@ export class Combatant {
   private readonly eyeR: Phaser.GameObjects.Arc;
   private readonly pupilL: Phaser.GameObjects.Arc;
   private readonly pupilR: Phaser.GameObjects.Arc;
+  /** Accessoire d'identité (casque, lunettes, gemme…) qui tourne avec la visée. */
+  private readonly accessory: Phaser.GameObjects.Container;
   private readonly hpBack: Phaser.GameObjects.Rectangle;
   private readonly hpFill: Phaser.GameObjects.Rectangle;
   private readonly cubeText: Phaser.GameObjects.Text;
@@ -124,6 +126,9 @@ export class Combatant {
     this.pupilL = scene.add.circle(0, 0, r * 0.14, Combatant.EYE_DARK, 1);
     this.pupilR = scene.add.circle(0, 0, r * 0.14, Combatant.EYE_DARK, 1);
 
+    // « Face gear » propre au rôle (identité visuelle par-delà la couleur).
+    this.accessory = this.buildAccessory(scene, r);
+
     this.hpBack = scene.add
       .rectangle(-Combatant.BAR_W / 2, -(r + 22), Combatant.BAR_W, 9, COLORS.healthBack)
       .setOrigin(0, 0.5)
@@ -155,6 +160,7 @@ export class Combatant {
       this.eyeR,
       this.pupilL,
       this.pupilR,
+      this.accessory,
       this.hpBack,
       this.hpFill,
       this.cubeText,
@@ -162,6 +168,37 @@ export class Combatant {
     ]);
     // Le joueur est rendu au-dessus des NPC.
     this.container.setDepth(isPlayer ? 20 : 15);
+  }
+
+  /**
+   * Construit l'accessoire de tête selon le RÔLE (repère lisible : casque =
+   * tank, lunettes = tireur, gemme = mage…). Repère local : +x vers l'avant
+   * (visée), +y en travers du visage — les « barres » sont donc fines en x.
+   */
+  private buildAccessory(scene: Phaser.Scene, r: number): Phaser.GameObjects.Container {
+    const acc = this.def.accent;
+    const DARK = 0x191932;
+    const parts: Phaser.GameObjects.GameObject[] = [];
+    switch (this.def.role) {
+      case 'tank': // casque : large visière sombre + liseré accent
+        parts.push(scene.add.rectangle(0, 0, r * 0.3, r * 1.2, DARK).setStrokeStyle(2, acc, 0.9));
+        break;
+      case 'sharpshooter': // lunettes de visée : barre accent + deux verres
+        parts.push(scene.add.rectangle(0, 0, r * 0.22, r * 1.1, acc));
+        parts.push(scene.add.circle(0, r * 0.34, r * 0.12, DARK, 0.9));
+        parts.push(scene.add.circle(0, -r * 0.34, r * 0.12, DARK, 0.9));
+        break;
+      case 'mage': // gemme au front (losange accent)
+        parts.push(scene.add.rectangle(0, 0, r * 0.44, r * 0.44, acc).setStrokeStyle(2, DARK, 0.8).setRotation(Math.PI / 4));
+        break;
+      case 'assassin': // bandeau/masque sombre
+        parts.push(scene.add.rectangle(0, 0, r * 0.3, r * 1.3, DARK));
+        break;
+      default: // support & autres : petite croix accent
+        parts.push(scene.add.rectangle(0, 0, r * 0.16, r * 0.5, acc));
+        parts.push(scene.add.rectangle(0, 0, r * 0.5, r * 0.16, acc));
+    }
+    return scene.add.container(0, 0, parts);
   }
 
   get maxHealth(): number {
@@ -289,6 +326,8 @@ export class Combatant {
     this.eyeR.setPosition(rx, ry);
     this.pupilL.setPosition(lx + ax * r * 0.12, ly + ay * r * 0.12);
     this.pupilR.setPosition(rx + ax * r * 0.12, ry + ay * r * 0.12);
+    // Accessoire au « front » : posé vers l'avant et tourné dans l'axe de visée.
+    this.accessory.setPosition(ax * r * 0.42, ay * r * 0.42).setRotation(this.aimAngle);
 
     // Flash « touché » (déclenché dès que la vie baisse).
     if (this.health < this.lastHealth) this.triggerHitFlash();

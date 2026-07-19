@@ -482,6 +482,7 @@ export class SoccerScene extends Phaser.Scene {
       const spread = Phaser.Math.DegToRad(a.spreadDeg);
       const dmg = a.damage * c.damageMult;
       const muzzle = c.def.radius + 6;
+      this.muzzleFlash(c.x + Math.cos(c.aimAngle) * muzzle, c.y + Math.sin(c.aimAngle) * muzzle, c.def.color);
       for (let i = 0; i < a.count; i++) {
         const t = a.count === 1 ? 0 : i / (a.count - 1) - 0.5;
         const ang = c.aimAngle + t * spread;
@@ -700,9 +701,33 @@ export class SoccerScene extends Phaser.Scene {
     this.tweens.add({ targets: ring, alpha: 0, duration: 440, ease: 'Quad.in', onComplete: () => ring.destroy() });
   }
 
+  /** Éclair de départ d'un tir (au bout du « canon »). */
+  private muzzleFlash(x: number, y: number, color: number): void {
+    const flash = this.add.circle(x, y, 13, COLORS.white, 0.9).setDepth(22).setScale(0.6);
+    this.tweens.add({ targets: flash, scale: 1.5, alpha: 0, duration: 120, ease: 'Quad.out', onComplete: () => flash.destroy() });
+    const tint = this.add.circle(x, y, 9, color, 0.85).setDepth(22);
+    this.tweens.add({ targets: tint, scale: 1.9, alpha: 0, duration: 170, ease: 'Cubic.out', onComplete: () => tint.destroy() });
+  }
+
+  /** Gerbe d'impact : un « pop » central + quelques éclats qui giclent. */
   private hitSpark(x: number, y: number, color: number): void {
-    const s = this.add.circle(x, y, 9, color, 0.9).setDepth(24);
-    this.tweens.add({ targets: s, scale: 2, alpha: 0, duration: 180, onComplete: () => s.destroy() });
+    const pop = this.add.circle(x, y, 10, COLORS.white, 0.95).setDepth(24);
+    this.tweens.add({ targets: pop, scale: 2.2, alpha: 0, duration: 160, ease: 'Quad.out', onComplete: () => pop.destroy() });
+    for (let i = 0; i < 6; i++) {
+      const ang = (i / 6) * Math.PI * 2 + Math.random() * 0.6;
+      const d = 18 + Math.random() * 12;
+      const shard = this.add.circle(x, y, 4, color, 1).setDepth(24);
+      this.tweens.add({
+        targets: shard,
+        x: x + Math.cos(ang) * d,
+        y: y + Math.sin(ang) * d,
+        scale: 0.2,
+        alpha: 0,
+        duration: 220,
+        ease: 'Cubic.out',
+        onComplete: () => shard.destroy(),
+      });
+    }
   }
 
   private deathBurst(x: number, y: number, color: number): void {

@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { makeButton, nightBackground } from '../ui/widgets';
-import { NetClient } from '../net/NetClient';
+import { NetClient, type JoinOptions } from '../net/NetClient';
 import { serverUrl } from '../net/config';
+import { ZAREKS } from '../zareks/registry';
 import type { Room } from 'colyseus.js';
 
 /**
@@ -16,39 +17,43 @@ export class OnlineMenuScene extends Phaser.Scene {
   private status!: Phaser.GameObjects.Text;
   private serverText!: Phaser.GameObjects.Text;
   private busy = false;
+  private zarekId = ZAREKS[0].id;
+  private modeId = 'brawl-ball';
 
   constructor() {
     super('OnlineMenu');
   }
 
-  create(): void {
+  create(data: { zarekId?: string; modeId?: string }): void {
     // La scène est réutilisée : on repart d'un état propre (sinon `busy` peut
     // rester bloqué après un match et « Match rapide » ne répond plus).
     this.busy = false;
     this.net = new NetClient();
+    this.zarekId = data?.zarekId ?? ZAREKS[0].id;
+    this.modeId = data?.modeId ?? 'brawl-ball';
     nightBackground(this);
     const w = this.scale.width;
     const cx = w / 2;
     const h = this.scale.height;
 
     this.add.text(cx, 70, 'EN LIGNE', { fontFamily: 'system-ui, sans-serif', fontSize: '44px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-    this.add.text(cx, 116, 'Joue avec tes amis ou au hasard', { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#9b8cff' }).setOrigin(0.5);
+    this.add.text(cx, 116, 'Brawl Ball 3v3 · joue avec tes amis ou au hasard', { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#9b8cff' }).setOrigin(0.5);
 
     this.add.text(cx, h * 0.24, 'Ton pseudo', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#d8d8ff' }).setOrigin(0.5);
     this.nameInput = this.makeInput('Pseudo', 16, localStorage.getItem('nyxt.pseudo') ?? '');
 
-    makeButton(this, cx, h * 0.44, 320, 64, 'MATCH RAPIDE', () => this.go(() => this.net.quickMatch(this.playerName())));
-    makeButton(this, cx, h * 0.56, 320, 64, 'CRÉER UN SALON', () => this.go(() => this.net.createRoom(this.playerName())), 0x2f8f5a);
+    makeButton(this, cx, h * 0.44, 320, 64, 'MATCH RAPIDE', () => this.go(() => this.net.quickMatch(this.opts())));
+    makeButton(this, cx, h * 0.56, 320, 64, 'CRÉER UN SALON', () => this.go(() => this.net.createRoom(this.opts())), 0x2f8f5a);
 
     this.add.text(cx, h * 0.68, 'Code du salon d’un ami', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#d8d8ff' }).setOrigin(0.5);
     this.codeInput = this.makeInput('Code', 12, '');
     makeButton(this, cx, h * 0.86, 300, 60, 'REJOINDRE', () => {
       const code = this.codeInput.value.trim();
       if (!code) return this.setStatus('Entre un code de salon.', '#ff6b5e');
-      this.go(() => this.net.joinRoom(code, this.playerName()));
+      this.go(() => this.net.joinRoom(code, this.opts()));
     }, 0x3a3466);
 
-    makeButton(this, 96, 48, 150, 46, '‹ Menu', () => this.scene.start('Menu'), 0x3a3466);
+    makeButton(this, 96, 48, 150, 46, '‹ Retour', () => this.scene.start('Select', { modeId: this.modeId, online: true }), 0x3a3466);
 
     this.status = this.add.text(cx, h * 0.93, '', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#ffcf33' }).setOrigin(0.5);
 
@@ -75,6 +80,10 @@ export class OnlineMenuScene extends Phaser.Scene {
     return n;
   }
 
+  private opts(): JoinOptions {
+    return { name: this.playerName(), zarek: this.zarekId };
+  }
+
   /** Lance une connexion, gère l'attente et les erreurs, puis entre en partie. */
   private async go(connect: () => Promise<Room>): Promise<void> {
     if (this.busy) return;
@@ -83,7 +92,7 @@ export class OnlineMenuScene extends Phaser.Scene {
     try {
       const room = await connect();
       this.setStatus('Connecté !', '#46d160');
-      this.scene.start('OnlineGame', { room });
+      this.scene.start('OnlineGame', { room, zarekId: this.zarekId });
     } catch (err) {
       this.busy = false;
       const msg = err instanceof Error ? err.message : String(err);

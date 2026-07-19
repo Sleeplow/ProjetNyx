@@ -4,6 +4,7 @@ import { COLORS } from '../config/constants';
 export interface Button {
   container: Phaser.GameObjects.Container;
   setPosition(x: number, y: number): void;
+  destroy(): void;
 }
 
 /** Bouton cliquable réutilisable (fond arrondi + libellé, effet de survol). */
@@ -64,6 +65,10 @@ export function makeButton(
     setPosition: (nx, ny) => {
       container.setPosition(nx, ny);
       zone.setPosition(nx, ny);
+    },
+    destroy: () => {
+      container.destroy();
+      zone.destroy();
     },
   };
 }

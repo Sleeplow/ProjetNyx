@@ -1,13 +1,29 @@
-import type { Combatant } from '../core/Combatant';
-import type { InputState, Rect } from '../core/types';
+import type { InputState, Rect, ZarekDef } from '../core/types';
 import { emptyInput } from '../core/types';
 import { AI } from '../config/constants';
 import { SOCCER } from '../config/soccer';
 import { dist, normalize, circleHitsRect } from '../core/geometry';
 
+/**
+ * Vue structurelle minimale d'un combattant dont l'IA a besoin. Le `BotView`
+ * Phaser (jeu local) ET le combattant de la simulation serveur la satisfont,
+ * donc la MÊME IA sert des deux côtés (solo et en ligne).
+ */
+export interface BotView {
+  id: string;
+  x: number;
+  y: number;
+  team: number;
+  aimAngle: number;
+  alive: boolean;
+  def: ZarekDef;
+  ultReady: boolean;
+  healthRatio: number;
+}
+
 /** Ce que l'IA foot doit connaître de la scène, fourni chaque frame. */
 export interface SoccerWorld {
-  all: Combatant[];
+  all: BotView[];
   ball: { x: number; y: number; carrierId: string | null; free: boolean };
   /** Centres des deux buts : [gauche, droite]. */
   leftGoal: { x: number; y: number };
@@ -34,7 +50,7 @@ export class SoccerBot {
     this.role = role;
   }
 
-  update(self: Combatant, world: SoccerWorld, dtMs: number): InputState {
+  update(self: BotView, world: SoccerWorld, dtMs: number): InputState {
     const input = emptyInput();
     if (!self.alive || world.frozen) return input;
 
@@ -110,7 +126,7 @@ export class SoccerBot {
    * essaie des directions de plus en plus déviées (gauche/droite) et on prend
    * la première dégagée. Le bot longe le mur au lieu de s'y écraser.
    */
-  private avoid(self: Combatant, mx: number, my: number, obstacles: Rect[]): { x: number; y: number } {
+  private avoid(self: BotView, mx: number, my: number, obstacles: Rect[]): { x: number; y: number } {
     if (mx === 0 && my === 0) return { x: 0, y: 0 };
     const base = Math.atan2(my, mx);
     const probe = self.def.radius + 46;
@@ -128,10 +144,10 @@ export class SoccerBot {
 
   /** Où se déplacer quand je ne porte pas la balle, selon la situation et mon rôle. */
   private movementTarget(
-    self: Combatant,
+    self: BotView,
     world: SoccerWorld,
     ball: SoccerWorld['ball'],
-    carrier: Combatant | undefined,
+    carrier: BotView | undefined,
     enemyGoal: { x: number; y: number },
     ownGoal: { x: number; y: number },
   ): { x: number; y: number } {
@@ -156,7 +172,7 @@ export class SoccerBot {
 
   /** Point de placement quand on ne va pas directement à la balle. */
   private supportPoint(
-    self: Combatant,
+    self: BotView,
     world: SoccerWorld,
     ball: SoccerWorld['ball'],
     enemyGoal: { x: number; y: number },
@@ -176,7 +192,7 @@ export class SoccerBot {
     return { x: ball.x + lane * 120, y: ball.y };
   }
 
-  private amClosestOnTeam(self: Combatant, world: SoccerWorld, x: number, y: number): boolean {
+  private amClosestOnTeam(self: BotView, world: SoccerWorld, x: number, y: number): boolean {
     const my = dist(self.x, self.y, x, y);
     for (const c of world.all) {
       if (c.id === self.id || c.team !== self.team || !c.alive) continue;
@@ -186,8 +202,8 @@ export class SoccerBot {
     return true;
   }
 
-  private nearestEnemy(self: Combatant, world: SoccerWorld, maxRange: number): Combatant | null {
-    let best: Combatant | null = null;
+  private nearestEnemy(self: BotView, world: SoccerWorld, maxRange: number): BotView | null {
+    let best: BotView | null = null;
     let bestD = maxRange;
     for (const c of world.all) {
       if (c.team === self.team || !c.alive) continue;

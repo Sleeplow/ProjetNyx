@@ -1,6 +1,13 @@
 import { Client, type Room } from 'colyseus.js';
 import { serverUrl } from './config';
 
+/** Options envoyées au serveur en rejoignant un salon. */
+export interface JoinOptions {
+  name: string;
+  zarek: string;
+  team?: number;
+}
+
 /**
  * Fine surcouche autour du client Colyseus. Trois façons d'entrer en partie :
  *  - createRoom  : ouvre un nouveau salon (on partage son id = code).
@@ -10,15 +17,15 @@ import { serverUrl } from './config';
 export class NetClient {
   private readonly client = new Client(serverUrl());
 
-  createRoom(name: string): Promise<Room> {
-    return this.client.create('nyxt', { name });
+  createRoom(opts: JoinOptions): Promise<Room> {
+    return this.client.create('nyxt', opts);
   }
 
-  joinRoom(code: string, name: string): Promise<Room> {
-    return this.client.joinById(code.trim(), { name });
+  joinRoom(code: string, opts: JoinOptions): Promise<Room> {
+    return this.client.joinById(code.trim(), opts);
   }
 
-  quickMatch(name: string): Promise<Room> {
-    return this.client.joinOrCreate('nyxt', { name });
+  quickMatch(opts: JoinOptions): Promise<Room> {
+    return this.client.joinOrCreate('nyxt', opts);
   }
 }

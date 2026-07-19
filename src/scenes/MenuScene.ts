@@ -28,8 +28,8 @@ export class MenuScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    makeButton(this, cx, h * 0.56, 300, 72, 'SOLO', () => this.scene.start('ModeSelect'));
-    makeButton(this, cx, h * 0.7, 300, 72, 'EN LIGNE', () => this.scene.start('OnlineMenu'), 0x2f8f5a);
+    makeButton(this, cx, h * 0.56, 300, 72, 'SOLO', () => this.scene.start('ModeSelect', { online: false }));
+    makeButton(this, cx, h * 0.7, 300, 72, 'EN LIGNE', () => this.scene.start('ModeSelect', { online: true }), 0x2f8f5a);
 
     this.add
       .text(cx, h - 40, 'Ordi : ZQSD/WASD + souris + clic · E = ultimate   |   Tablette : joysticks tactiles', {

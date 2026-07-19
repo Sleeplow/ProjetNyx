@@ -8,6 +8,7 @@ import { MODES } from '../modes/registry';
 export class SelectScene extends Phaser.Scene {
   private selectedId = ZAREKS[0].id;
   private modeId = MODES[0].id;
+  private online = false;
   private details!: Phaser.GameObjects.Text;
   private cardBorders: Map<string, Phaser.GameObjects.Rectangle> = new Map();
 
@@ -15,19 +16,22 @@ export class SelectScene extends Phaser.Scene {
     super('Select');
   }
 
-  create(data: { modeId?: string }): void {
+  create(data: { modeId?: string; online?: boolean }): void {
     nightBackground(this);
     const w = this.scale.width;
     const h = this.scale.height;
     const cx = w / 2;
 
     this.modeId = data?.modeId ?? MODES[0].id;
+    this.online = !!data?.online;
     const mode = MODES.find((m) => m.id === this.modeId) ?? MODES[0];
 
     this.add.text(cx, 60, 'CHOISIS TON ZAREK', { fontFamily: 'system-ui, sans-serif', fontSize: '40px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-    this.add.text(cx, 104, `Mode : ${mode.name} — ${mode.tagline}`, { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#9b8cff' }).setOrigin(0.5);
+    this.add
+      .text(cx, 104, `${this.online ? '🌐 En ligne · ' : ''}Mode : ${mode.name} — ${mode.tagline}`, { fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: this.online ? '#46d160' : '#9b8cff', fontStyle: this.online ? 'bold' : 'normal' })
+      .setOrigin(0.5);
     // Retour au sélecteur de mode.
-    makeButton(this, 96, 48, 150, 46, '‹ Retour', () => this.scene.start('ModeSelect'), 0x3a3466);
+    makeButton(this, 96, 48, 150, 46, '‹ Retour', () => this.scene.start('ModeSelect', { online: this.online }), 0x3a3466);
 
     // Cartes : les Zareks jouables + des emplacements verrouillés (extension future).
     const lockedSlots = 2;
@@ -51,9 +55,13 @@ export class SelectScene extends Phaser.Scene {
       .text(cx, h * 0.6, '', { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#d8d8ff', align: 'center', lineSpacing: 5, wordWrap: { width: Math.min(760, w - 60) } })
       .setOrigin(0.5, 0);
 
-    // Chaque mode a sa scène : le foot (Brawl Ball) tourne dans SoccerScene.
-    const targetScene = this.modeId === 'brawl-ball' ? 'Soccer' : 'Game';
-    makeButton(this, cx, h - 58, 280, 62, 'LANCER LA PARTIE', () => this.scene.start(targetScene, { zarekId: this.selectedId, modeId: this.modeId }));
+    // En ligne : on passe par le lobby (pseudo + salon). Solo : on lance la scène du mode.
+    if (this.online) {
+      makeButton(this, cx, h - 58, 300, 62, 'JOUER EN LIGNE', () => this.scene.start('OnlineMenu', { zarekId: this.selectedId, modeId: this.modeId }), 0x2f8f5a);
+    } else {
+      const targetScene = this.modeId === 'brawl-ball' ? 'Soccer' : 'Game';
+      makeButton(this, cx, h - 58, 280, 62, 'LANCER LA PARTIE', () => this.scene.start(targetScene, { zarekId: this.selectedId, modeId: this.modeId }));
+    }
 
     this.refresh();
   }

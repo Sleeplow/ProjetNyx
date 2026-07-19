@@ -73,7 +73,6 @@ export class ModeSelectScene extends Phaser.Scene {
     this.nameText.setText(m.name);
     this.taglineText.setText(m.tagline);
     this.descText.setText(m.description);
-    const suffix = this.online ? "   ·   Battle Royale en ligne à venir" : '';
-    this.counterText.setText(`${this.index + 1} / ${this.modes.length}${suffix}`);
+    this.counterText.setText(`${this.index + 1} / ${this.modes.length}`);
   }
 }

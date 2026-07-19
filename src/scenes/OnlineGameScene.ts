@@ -130,14 +130,16 @@ export class OnlineGameScene extends Phaser.Scene {
       const moved = stepMovement(this.predX, this.predY, localDef.radius, input.moveX, input.moveY, spd, dtSec, PITCH_NYXT.map.obstacles, PITCH_NYXT.map.width, PITCH_NYXT.map.height);
       this.predX = moved.x;
       this.predY = moved.y;
-      // Recalage doux vers l'autorité serveur (corrige la dérive).
+      // Recalage vers l'autorité serveur : TRÈS doux en mouvement (sinon le retard
+      // réseau tire le perso en arrière = effet élastique), plus ferme à l'arrêt.
       const err = dist(this.predX, this.predY, me.x, me.y);
-      if (err > 160) {
+      if (err > 240) {
         this.predX = me.x;
         this.predY = me.y;
       } else {
-        this.predX = Phaser.Math.Linear(this.predX, me.x, 0.12);
-        this.predY = Phaser.Math.Linear(this.predY, me.y, 0.12);
+        const k = input.moveX !== 0 || input.moveY !== 0 ? 0.05 : 0.2;
+        this.predX = Phaser.Math.Linear(this.predX, me.x, k);
+        this.predY = Phaser.Math.Linear(this.predY, me.y, k);
       }
       this.room.send('input', input);
     } else if (me) {
@@ -374,7 +376,10 @@ export class OnlineGameScene extends Phaser.Scene {
 
   private uiButton(x: number, y: number, w: number, h: number, label: string, color: number, onClick: () => void): Button {
     const b = makeButton(this, x, y, w, h, label, onClick, color);
-    b.container.setScrollFactor(0).setDepth(1001);
+    // IMPORTANT : fixer le visuel ET la zone cliquable à l'écran, sinon la zone
+    // suit le monde (caméra) et se décale du bouton → impossible à cliquer.
+    b.setScrollFactor(0);
+    b.container.setDepth(1001);
     return b;
   }
 

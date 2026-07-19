@@ -4,6 +4,8 @@ import { COLORS } from '../config/constants';
 export interface Button {
   container: Phaser.GameObjects.Container;
   setPosition(x: number, y: number): void;
+  /** Fixe le facteur de défilement du VISUEL ET de la zone cliquable (doivent rester alignés). */
+  setScrollFactor(value: number): void;
   destroy(): void;
 }
 
@@ -65,6 +67,10 @@ export function makeButton(
     setPosition: (nx, ny) => {
       container.setPosition(nx, ny);
       zone.setPosition(nx, ny);
+    },
+    setScrollFactor: (value) => {
+      container.setScrollFactor(value);
+      zone.setScrollFactor(value);
     },
     destroy: () => {
       container.destroy();

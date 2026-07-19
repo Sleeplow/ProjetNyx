@@ -16,9 +16,16 @@ export interface GameModeDef {
 
 export const BATTLE_ROYALE: GameModeDef = {
   id: 'battle-royale',
-  name: 'Battle Royale',
+  name: 'Battle Royale — Classic',
   tagline: 'Dernier survivant',
   description: '1 joueur contre 4 NPC. La zone se referme, ramasse des cubes de power-up et sois le dernier en vie.',
+};
+
+export const BATTLE_ROYALE_PORTAL: GameModeDef = {
+  id: 'battle-royale-portal',
+  name: 'Battle Royale — Portal',
+  tagline: 'Portails & neurotoxine',
+  description: 'Grande salle envahie par la neurotoxine. Prends un portail VERT pour fuir vers le refuge, exploite les portails itinérants… mais le refuge finit par se remplir aussi.',
 };
 
 export const BRAWL_BALL: GameModeDef = {
@@ -29,4 +36,4 @@ export const BRAWL_BALL: GameModeDef = {
 };
 
 /** Ordre affiché dans le sélecteur (roulette). */
-export const MODES: GameModeDef[] = [BATTLE_ROYALE, BRAWL_BALL];
+export const MODES: GameModeDef[] = [BATTLE_ROYALE, BATTLE_ROYALE_PORTAL, BRAWL_BALL];

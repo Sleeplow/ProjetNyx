@@ -84,6 +84,11 @@ export class Hud {
     this.vignette.setAlpha(show ? 0.12 + 0.06 * Math.abs(Math.sin(this.pulse / 220)) : 0);
   }
 
+  /** Personnalise le texte d'alerte de danger (ex. « NEUROTOXINE » pour le tableau Portal). */
+  setWarningText(text: string): void {
+    this.warning.setText(text);
+  }
+
   /** Affiche brièvement une annonce au centre. */
   flash(message: string, color = '#ffffff'): void {
     this.announce.setText(message).setColor(color).setAlpha(1).setScale(1.15);

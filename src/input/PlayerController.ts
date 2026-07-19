@@ -3,6 +3,7 @@ import type { Combatant } from '../core/Combatant';
 import type { InputState } from '../core/types';
 import { emptyInput } from '../core/types';
 import { Joystick } from '../ui/Joystick';
+import { safeInsets } from '../ui/layout';
 import { COLORS } from '../config/constants';
 
 /**
@@ -70,8 +71,11 @@ export class PlayerController {
   private layout(): void {
     const w = this.scene.scale.width;
     const h = this.scene.scale.height;
-    this.ultBtn.setPosition(w - 96, h - 104);
-    this.ultLabel.setPosition(w - 96, h - 104);
+    const i = safeInsets();
+    const bx = w - 96 - i.right;
+    const by = h - 104 - i.bottom;
+    this.ultBtn.setPosition(bx, by);
+    this.ultLabel.setPosition(bx, by);
   }
 
   /** Appui sur le bouton ULT lui-même (petite tolérance pour le doigt). */

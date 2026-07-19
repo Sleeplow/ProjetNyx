@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { ZAREKS } from '../zareks/registry';
 import type { ZarekDef } from '../core/types';
 import { makeButton, nightBackground } from '../ui/widgets';
+import { computeFrame, watchResize, type Frame } from '../ui/layout';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { MODES } from '../modes/registry';
 
@@ -38,6 +39,7 @@ export class SelectScene extends Phaser.Scene {
   private ficheAvatar?: AvatarVisual;
   private ficheAvatarX = 0;
   private ficheAvatarY = 0;
+  private ficheScale = 2.1;
   private nameText!: Phaser.GameObjects.Text;
   private roleText!: Phaser.GameObjects.Text;
   private abilityText!: Phaser.GameObjects.Text;
@@ -49,26 +51,27 @@ export class SelectScene extends Phaser.Scene {
     super('Select');
   }
 
-  create(data: { modeId?: string; online?: boolean }): void {
+  create(data: { modeId?: string; online?: boolean; selectedId?: string }): void {
     nightBackground(this);
-    const w = this.scale.width;
-    const h = this.scale.height;
-    const cx = w / 2;
+    const F = computeFrame(this);
 
     this.modeId = data?.modeId ?? MODES[0].id;
     this.online = !!data?.online;
-    this.selectedId = ZAREKS[0].id;
+    this.selectedId = data?.selectedId ?? ZAREKS[0].id;
     this.cardBorders = new Map();
     this.barFills = [];
     this.barValues = [];
     this.ficheAvatar = undefined;
     const mode = MODES.find((m) => m.id === this.modeId) ?? MODES[0];
 
-    this.add.text(cx, 52, 'CHOISIS TON ZAREK', { fontFamily: 'system-ui, sans-serif', fontSize: '38px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+    const t = F.at(0, 46);
+    this.add.text(t.x, t.y, 'CHOISIS TON ZAREK', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(38), color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+    const sub = F.at(0, 86);
     this.add
-      .text(cx, 92, `${this.online ? '🌐 En ligne · ' : ''}Mode : ${mode.name} — ${mode.tagline}`, { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: this.online ? '#46d160' : '#9b8cff', fontStyle: this.online ? 'bold' : 'normal' })
+      .text(sub.x, sub.y, `${this.online ? '🌐 En ligne · ' : ''}Mode : ${mode.name} — ${mode.tagline}`, { fontFamily: 'system-ui, sans-serif', fontSize: F.font(17), color: this.online ? '#46d160' : '#9b8cff', fontStyle: this.online ? 'bold' : 'normal' })
       .setOrigin(0.5);
-    makeButton(this, 92, 44, 140, 44, '‹ Retour', () => this.scene.start('ModeSelect', { online: this.online }), 0x3a3466);
+    const back = F.at(-432, 40);
+    makeButton(this, back.x, back.y, F.px(140), F.px(44), '‹ Retour', () => this.scene.start('ModeSelect', { online: this.online }), 0x3a3466);
 
     // Sélecteur compact : petites cartes (rond coloré + nom) + emplacements verrouillés.
     const lockedSlots = 2;
@@ -76,81 +79,88 @@ export class SelectScene extends Phaser.Scene {
     const cardW = 108;
     const gap = 14;
     const rowW = total * cardW + (total - 1) * gap;
-    let x = cx - rowW / 2 + cardW / 2;
-    const cardY = 168;
+    const cardY = 152;
+    let dx = -rowW / 2 + cardW / 2;
     for (const z of ZAREKS) {
-      this.makeCard(x, cardY, cardW, z);
-      x += cardW + gap;
+      const p = F.at(dx, cardY);
+      this.makeCard(p.x, p.y, F, z);
+      dx += cardW + gap;
     }
     for (let i = 0; i < lockedSlots; i++) {
-      this.makeLockedCard(x, cardY, cardW);
-      x += cardW + gap;
+      const p = F.at(dx, cardY);
+      this.makeLockedCard(p.x, p.y, F);
+      dx += cardW + gap;
     }
 
-    this.buildFiche(cx, h);
+    this.buildFiche(F);
 
+    const play = F.at(0, 560);
     if (this.online) {
-      makeButton(this, cx, h - 52, 300, 60, 'JOUER EN LIGNE', () => this.scene.start('OnlineMenu', { zarekId: this.selectedId, modeId: this.modeId }), 0x2f8f5a);
+      makeButton(this, play.x, play.y, F.px(300), F.px(60), 'JOUER EN LIGNE', () => this.scene.start('OnlineMenu', { zarekId: this.selectedId, modeId: this.modeId }), 0x2f8f5a);
     } else {
       const targetScene = this.modeId === 'brawl-ball' ? 'Soccer' : 'Game';
-      makeButton(this, cx, h - 52, 280, 60, 'LANCER LA PARTIE', () => this.scene.start(targetScene, { zarekId: this.selectedId, modeId: this.modeId }));
+      makeButton(this, play.x, play.y, F.px(280), F.px(60), 'LANCER LA PARTIE', () => this.scene.start(targetScene, { zarekId: this.selectedId, modeId: this.modeId }));
     }
 
     this.refresh();
     this.events.once('shutdown', () => this.ficheAvatar?.destroy());
+    watchResize(this, () => this.scene.restart({ modeId: this.modeId, online: this.online, selectedId: this.selectedId }));
   }
 
-  private makeCard(x: number, y: number, cardW: number, z: ZarekDef): void {
-    const cardH = 116;
+  private makeCard(x: number, y: number, F: Frame, z: ZarekDef): void {
+    const cardW = F.px(108);
+    const cardH = F.px(112);
     const bg = this.add.rectangle(x, y, cardW, cardH, 0x1a1636, 0.95).setStrokeStyle(3, 0x3a3466);
     const border = this.add.rectangle(x, y, cardW, cardH).setStrokeStyle(4, 0xffe066, 0).setFillStyle(0, 0);
     this.cardBorders.set(z.id, border);
-    this.add.circle(x, y - 22, 26, z.color).setStrokeStyle(3, z.accent);
-    this.add.text(x, y + 26, z.name, { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-    this.add.text(x, y + 46, roleLabel(z.role), { fontFamily: 'system-ui, sans-serif', fontSize: '12px', color: '#9b8cff' }).setOrigin(0.5);
+    this.add.circle(x, y - F.px(24), F.px(24), z.color).setStrokeStyle(3, z.accent);
+    this.add.text(x, y + F.px(24), z.name, { fontFamily: 'system-ui, sans-serif', fontSize: F.font(16), color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+    this.add.text(x, y + F.px(43), roleLabel(z.role), { fontFamily: 'system-ui, sans-serif', fontSize: F.font(12), color: '#9b8cff' }).setOrigin(0.5);
     bg.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
       this.selectedId = z.id;
       this.refresh();
     });
   }
 
-  private makeLockedCard(x: number, y: number, cardW: number): void {
-    const cardH = 116;
+  private makeLockedCard(x: number, y: number, F: Frame): void {
+    const cardW = F.px(108);
+    const cardH = F.px(112);
     this.add.rectangle(x, y, cardW, cardH, 0x121026, 0.7).setStrokeStyle(3, 0x2a2640);
-    this.add.circle(x, y - 22, 26, 0x201d3a).setStrokeStyle(3, 0x2f2b4d);
-    this.add.text(x, y - 22, '?', { fontFamily: 'system-ui, sans-serif', fontSize: '28px', color: '#4a4670', fontStyle: 'bold' }).setOrigin(0.5);
-    this.add.text(x, y + 30, 'Bientôt', { fontFamily: 'system-ui, sans-serif', fontSize: '13px', color: '#4a4670' }).setOrigin(0.5);
+    this.add.circle(x, y - F.px(24), F.px(24), 0x201d3a).setStrokeStyle(3, 0x2f2b4d);
+    this.add.text(x, y - F.px(24), '?', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(28), color: '#4a4670', fontStyle: 'bold' }).setOrigin(0.5);
+    this.add.text(x, y + F.px(28), 'Bientôt', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(13), color: '#4a4670' }).setOrigin(0.5);
   }
 
   /** Panneau fiche : gros avatar cartoon à gauche, barres de stats à droite. */
-  private buildFiche(cx: number, h: number): void {
-    const panelY = h * 0.6;
-    const panelW = 800;
-    const panelH = 320;
-    this.add.rectangle(cx, panelY, panelW, panelH, 0x141130, 0.92).setStrokeStyle(3, 0x6a4dff).setDepth(1);
+  private buildFiche(F: Frame): void {
+    const panel = F.at(0, 365);
+    this.add.rectangle(panel.x, panel.y, F.px(820), F.px(300), 0x141130, 0.92).setStrokeStyle(3, 0x6a4dff).setDepth(1);
 
     // Colonne gauche : avatar + nom + rôle + capacités.
-    this.ficheAvatarX = cx - panelW / 2 + 150;
-    this.ficheAvatarY = panelY - 70;
-    this.nameText = this.add.text(this.ficheAvatarX, panelY + 4, '', { fontFamily: 'system-ui, sans-serif', fontSize: '26px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(2);
-    this.roleText = this.add.text(this.ficheAvatarX, panelY + 34, '', { fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#b3a3ff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(2);
+    const avatar = F.at(-260, 295);
+    this.ficheAvatarX = avatar.x;
+    this.ficheAvatarY = avatar.y;
+    this.ficheScale = 2.1 * F.s;
+    const nameP = F.at(-260, 369);
+    this.nameText = this.add.text(nameP.x, nameP.y, '', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(26), color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(2);
+    const roleP = F.at(-260, 399);
+    this.roleText = this.add.text(roleP.x, roleP.y, '', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(16), color: '#b3a3ff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(2);
+    const abilP = F.at(-260, 427);
     this.abilityText = this.add
-      .text(this.ficheAvatarX, panelY + 62, '', { fontFamily: 'system-ui, sans-serif', fontSize: '13px', color: '#cfcfe6', align: 'center', lineSpacing: 4, wordWrap: { width: 250 } })
+      .text(abilP.x, abilP.y, '', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(13), color: '#cfcfe6', align: 'center', lineSpacing: 4, wordWrap: { width: F.px(250) } })
       .setOrigin(0.5, 0)
       .setDepth(2);
 
     // Colonne droite : barres.
-    const labelX = cx - 10;
-    const trackX = cx + 90;
-    this.barTrackW = 250;
-    const startY = panelY - 96;
+    this.barTrackW = F.px(250);
     const rowH = 44;
     STATS.forEach((s, i) => {
-      const rowY = startY + i * rowH;
-      this.add.text(labelX, rowY, s.label, { fontFamily: 'system-ui, sans-serif', fontSize: '15px', color: '#d8d8ff', fontStyle: 'bold' }).setOrigin(0, 0.5).setDepth(2);
-      this.add.rectangle(trackX, rowY, this.barTrackW, 16, 0x0e0e1c, 0.9).setOrigin(0, 0.5).setStrokeStyle(2, 0x000000, 0.6).setDepth(2);
-      const fill = this.add.rectangle(trackX, rowY, 0, 16, s.color).setOrigin(0, 0.5).setDepth(3);
-      const val = this.add.text(trackX + this.barTrackW + 12, rowY, '', { fontFamily: 'system-ui, sans-serif', fontSize: '14px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0, 0.5).setDepth(3);
+      const label = F.at(-10, 269 + i * rowH);
+      const track = F.at(90, 269 + i * rowH);
+      this.add.text(label.x, label.y, s.label, { fontFamily: 'system-ui, sans-serif', fontSize: F.font(15), color: '#d8d8ff', fontStyle: 'bold' }).setOrigin(0, 0.5).setDepth(2);
+      this.add.rectangle(track.x, track.y, this.barTrackW, F.px(16), 0x0e0e1c, 0.9).setOrigin(0, 0.5).setStrokeStyle(2, 0x000000, 0.6).setDepth(2);
+      const fill = this.add.rectangle(track.x, track.y, 0, F.px(16), s.color).setOrigin(0, 0.5).setDepth(3);
+      const val = this.add.text(track.x + this.barTrackW + F.px(12), track.y, '', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(14), color: '#ffffff', fontStyle: 'bold' }).setOrigin(0, 0.5).setDepth(3);
       this.barFills.push(fill);
       this.barValues.push(val);
     });
@@ -165,7 +175,7 @@ export class SelectScene extends Phaser.Scene {
     // Avatar de la fiche (recréé pour le Zarek courant).
     this.ficheAvatar?.destroy();
     this.ficheAvatar = createAvatarVisual(this, z, { isSelf: false, label: '', decor: true });
-    this.ficheAvatar.container.setPosition(this.ficheAvatarX, this.ficheAvatarY).setScale(2.1).setDepth(2);
+    this.ficheAvatar.container.setPosition(this.ficheAvatarX, this.ficheAvatarY).setScale(this.ficheScale).setDepth(2);
     this.ficheAvatar.setAim(0.35);
 
     this.nameText.setText(z.name);

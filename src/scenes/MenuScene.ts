@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { makeButton, nightBackground } from '../ui/widgets';
+import { computeFrame, watchResize, type Frame } from '../ui/layout';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { ZAREK_BY_ID, ZAREKS } from '../zareks/registry';
 
@@ -19,15 +20,15 @@ export class MenuScene extends Phaser.Scene {
   create(): void {
     const w = this.scale.width;
     const h = this.scale.height;
-    const cx = w / 2;
+    const F = computeFrame(this);
 
     this.mascots = [];
     this.usingMouse = false;
-    this.idleX = cx;
-    this.idleY = h * 0.34;
+    this.idleX = F.cx;
+    this.idleY = F.at(0, 168).y;
 
     nightBackground(this);
-    this.buildMascots(w, h, cx);
+    this.buildMascots(w, h, F);
 
     // Suivi du pointeur : une souris qui survole → on la suit ; en tactile,
     // seul un doigt posé compte (voir update()).
@@ -36,59 +37,69 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // Lune stylisée + halo derrière le titre (thème Nyxt).
-    this.add.circle(cx, h * 0.28, 110, 0x6a4dff, 0.12).setDepth(-60);
-    this.add.circle(cx, h * 0.28, 90, 0x2a2350, 0.95).setStrokeStyle(3, 0x8a5cff, 0.7).setDepth(-60);
-    this.add.circle(cx + 34, h * 0.25, 60, 0x120f28, 1).setDepth(-60);
+    const moon = F.at(0, 158);
+    this.add.circle(moon.x, moon.y, F.px(110), 0x6a4dff, 0.12).setDepth(-60);
+    this.add.circle(moon.x, moon.y, F.px(90), 0x2a2350, 0.95).setStrokeStyle(3, 0x8a5cff, 0.7).setDepth(-60);
+    this.add.circle(moon.x + F.px(34), moon.y - F.px(18), F.px(60), 0x120f28, 1).setDepth(-60);
 
     // Titre : gros, contour + ombre, entrée qui « tombe » avec un rebond.
+    const titlePos = F.at(0, 190);
     const title = this.add
-      .text(cx, h * 0.31, 'PROJET NYXT', { fontFamily: 'system-ui, sans-serif', fontSize: '74px', color: '#ffffff', fontStyle: 'bold' })
+      .text(titlePos.x, titlePos.y, 'PROJET NYXT', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(74), color: '#ffffff', fontStyle: 'bold' })
       .setOrigin(0.5);
-    title.setStroke('#5a2fd6', 10);
-    title.setShadow(0, 8, 'rgba(0,0,0,0.5)', 12, true, true);
-    title.setY(h * 0.31 - 130).setAlpha(0);
-    this.tweens.add({ targets: title, y: h * 0.31, alpha: 1, duration: 700, ease: 'Back.out' });
+    title.setStroke('#5a2fd6', Math.max(4, F.px(10)));
+    title.setShadow(0, F.px(8), 'rgba(0,0,0,0.5)', F.px(12), true, true);
+    title.setY(titlePos.y - F.px(130)).setAlpha(0);
+    this.tweens.add({ targets: title, y: titlePos.y, alpha: 1, duration: 700, ease: 'Back.out' });
     this.tweens.add({ targets: title, scale: 1.035, duration: 2000, yoyo: true, repeat: -1, ease: 'Sine.inOut', delay: 800 });
 
+    const tagPos = F.at(0, 250);
     const tag = this.add
-      .text(cx, h * 0.31 + 60, 'Battle Royale · Brawl Ball', { fontFamily: 'system-ui, sans-serif', fontSize: '24px', color: '#b3a3ff', fontStyle: 'bold' })
+      .text(tagPos.x, tagPos.y, 'Battle Royale · Brawl Ball', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(24), color: '#b3a3ff', fontStyle: 'bold' })
       .setOrigin(0.5)
       .setAlpha(0);
     this.tweens.add({ targets: tag, alpha: 1, duration: 600, delay: 500 });
 
     // Boutons : entrée décalée qui « monte ».
-    const solo = makeButton(this, cx, h * 0.56, 300, 72, 'SOLO', () => this.scene.start('ModeSelect', { online: false }));
-    const online = makeButton(this, cx, h * 0.7, 300, 72, 'EN LIGNE', () => this.scene.start('ModeSelect', { online: true }), 0x2f8f5a);
+    const soloPos = F.at(0, 350);
+    const onlinePos = F.at(0, 442);
+    const solo = makeButton(this, soloPos.x, soloPos.y, F.px(300), F.px(72), 'SOLO', () => this.scene.start('ModeSelect', { online: false }));
+    const online = makeButton(this, onlinePos.x, onlinePos.y, F.px(300), F.px(72), 'EN LIGNE', () => this.scene.start('ModeSelect', { online: true }), 0x2f8f5a);
     [solo, online].forEach((b, i) => {
-      b.container.setAlpha(0).setY(b.container.y + 40);
-      this.tweens.add({ targets: b.container, y: `-=40`, alpha: 1, duration: 500, delay: 720 + i * 130, ease: 'Back.out' });
+      b.container.setAlpha(0).setY(b.container.y + F.px(40));
+      this.tweens.add({ targets: b.container, y: `-=${F.px(40)}`, alpha: 1, duration: 500, delay: 720 + i * 130, ease: 'Back.out' });
     });
 
+    const hintPos = F.at(0, 566);
     const hint = this.add
-      .text(cx, h - 40, 'Ordi : ZQSD/WASD + souris + clic · E = ultimate   |   Tablette : joysticks tactiles', {
+      .text(hintPos.x, hintPos.y, 'Ordi : ZQSD/WASD + souris + clic · E = ultimate   |   Mobile : joysticks tactiles', {
         fontFamily: 'system-ui, sans-serif',
-        fontSize: '16px',
+        fontSize: F.font(16),
         color: '#6c6c99',
+        align: 'center',
+        wordWrap: { width: F.px(940) },
       })
       .setOrigin(0.5)
       .setAlpha(0);
     this.tweens.add({ targets: hint, alpha: 1, duration: 600, delay: 1000 });
 
-    this.buildVersionTag(w, h);
+    this.buildVersionTag(w, h, F);
+
+    watchResize(this, () => this.scene.restart());
   }
 
   /** Quelques Zareks « cartoon » qui flottent en arrière-plan et regardent le titre. */
-  private buildMascots(w: number, h: number, cx: number): void {
+  private buildMascots(w: number, h: number, F: Frame): void {
     const macs = [
-      { id: 'zephyr', x: w * 0.15, y: h * 0.52, s: 1.35 },
-      { id: 'atlas', x: w * 0.85, y: h * 0.44, s: 1.15 },
-      { id: 'hecate', x: w * 0.83, y: h * 0.8, s: 1.25 },
+      { id: 'zephyr', x: w * 0.15, y: h * 0.54, s: 1.35 },
+      { id: 'atlas', x: w * 0.85, y: h * 0.42, s: 1.15 },
+      { id: 'hecate', x: w * 0.84, y: h * 0.82, s: 1.25 },
     ];
     for (const m of macs) {
       const def = ZAREK_BY_ID[m.id] ?? ZAREKS[0];
       const vis = createAvatarVisual(this, def, { isSelf: false, label: '', decor: true });
-      vis.container.setPosition(m.x, m.y).setDepth(-40).setScale(m.s).setAlpha(0);
-      const aim = Math.atan2(h * 0.34 - m.y, cx - m.x); // regarde vers le titre au départ
+      vis.container.setPosition(m.x, m.y).setDepth(-40).setScale(m.s * F.s).setAlpha(0);
+      const aim = Math.atan2(this.idleY - m.y, this.idleX - m.x); // regarde vers le titre au départ
       vis.setAim(aim);
       this.mascots.push({ vis, aim });
       this.tweens.add({ targets: vis.container, alpha: 1, duration: 700, delay: 250 });
@@ -111,7 +122,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   /** Version affichée en bas à droite : environnement (PROD/QA/DEV) + build id. */
-  private buildVersionTag(w: number, h: number): void {
+  private buildVersionTag(w: number, h: number, F: Frame): void {
     const path = window.location.pathname;
     const host = window.location.hostname;
     const env = path.includes('/qa')
@@ -120,6 +131,8 @@ export class MenuScene extends Phaser.Scene {
         ? 'DEV'
         : 'PROD';
     const envColor = env === 'QA' ? '#ff8a3d' : env === 'PROD' ? '#46d160' : '#9b8cff';
-    this.add.text(w - 12, h - 10, `${env} · ${__BUILD_ID__}`, { fontFamily: 'system-ui, sans-serif', fontSize: '13px', color: envColor }).setOrigin(1, 1);
+    this.add
+      .text(w - F.insets.right - 12, h - F.insets.bottom - 10, `${env} · ${__BUILD_ID__}`, { fontFamily: 'system-ui, sans-serif', fontSize: '13px', color: envColor })
+      .setOrigin(1, 1);
   }
 }

@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import type { Combatant } from '../core/Combatant';
 import { COLORS } from '../config/constants';
 import { TEAM } from '../config/soccer';
+import { safeInsets } from './layout';
 
 /** HUD du mode Brawl Ball : score + chrono en haut, vie/ult du joueur en bas. */
 export class SoccerHud {
@@ -61,10 +62,11 @@ export class SoccerHud {
   private layout(): void {
     const w = this.scene.scale.width;
     const h = this.scene.scale.height;
-    this.scoreText.setPosition(w / 2, 12);
-    this.timerText.setPosition(w / 2, 54);
-    const hx = 24;
-    const hy = h - 54;
+    const i = safeInsets();
+    this.scoreText.setPosition(w / 2, 12 + i.top);
+    this.timerText.setPosition(w / 2, 54 + i.top);
+    const hx = 24 + i.left;
+    const hy = h - 54 - i.bottom;
     this.hpBack.setPosition(hx, hy);
     this.hpFill.setPosition(hx, hy);
     this.hpText.setPosition(hx + 8, hy);

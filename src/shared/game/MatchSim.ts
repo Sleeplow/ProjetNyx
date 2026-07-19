@@ -966,7 +966,7 @@ export class MatchSim {
       u.chainJumpRange ?? 300,
       u.chainMaxJumps ?? 5,
     );
-    const dmg = u.damage * c.damageMult;
+    let dmg = u.damage * c.damageMult;
     this.fx.push({ k: 'ult', x: c.x, y: c.y, r: 90, c: c.def.color });
     let px = c.x;
     let py = c.y;
@@ -982,6 +982,7 @@ export class MatchSim {
       this.fx.push({ k: 'hit', x: e.x, y: e.y, c: c.def.color });
       px = e.x;
       py = e.y;
+      dmg *= u.chainFalloff ?? 1; // −25 % par cible suivante
     }
   }
 

@@ -41,7 +41,12 @@ export class OnlineMenuScene extends Phaser.Scene {
     nightBackground(this);
     const F = computeFrame(this);
 
-    const sub = this.modeId === 'battle-royale' ? 'Battle Royale · dernier survivant, jusqu’à 6 joueurs' : 'Brawl Ball 3v3 · joue avec tes amis ou au hasard';
+    const sub =
+      this.modeId === 'battle-royale'
+        ? 'Battle Royale · dernier survivant, jusqu’à 6 joueurs'
+        : this.modeId === 'battle-royale-portal'
+          ? 'Battle Royale — Portal · portails + neurotoxine, jusqu’à 6 joueurs'
+          : 'Brawl Ball 3v3 · joue avec tes amis ou au hasard';
     const titleP = F.at(0, 58);
     this.add.text(titleP.x, titleP.y, 'EN LIGNE', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(44), color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
     const subP = F.at(0, 102);

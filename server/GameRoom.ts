@@ -28,7 +28,8 @@ export class GameRoom extends Room<RoomInfo> {
   private sim!: MatchSim;
 
   onCreate(options?: JoinOptions): void {
-    const mode: OnlineMode = options?.mode === 'battle-royale' ? 'battle-royale' : 'brawl-ball';
+    const mode: OnlineMode =
+      options?.mode === 'battle-royale' ? 'battle-royale' : options?.mode === 'battle-royale-portal' ? 'battle-royale-portal' : 'brawl-ball';
     this.sim = new MatchSim(mode);
     const info = new RoomInfo();
     info.mode = mode;

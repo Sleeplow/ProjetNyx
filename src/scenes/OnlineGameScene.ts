@@ -9,10 +9,12 @@ import { ZAREKS, ZAREK_BY_ID } from '../zareks/registry';
 import type { ZarekDef, MapDef } from '../core/types';
 import { stepMovement } from '../shared/game/movement';
 import { clamp, dist } from '../core/geometry';
-import { makeButton, type Button } from '../ui/widgets';
+import { makeButton, makeQuitButton, type Button } from '../ui/widgets';
 import { safeInsets } from '../ui/layout';
 import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
+import { createPowerGemVisual } from '../core/PowerCube';
+import { BUSH_KEYS, LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider } from '../render/props';
 import { drawCartoonPitch } from '../render/pitchRender';
 import { drawChainBolt } from '../render/fx';
 import type { MatchSnapshot, SnapPlayer, FxEvent } from '../shared/game/snapshot';
@@ -48,7 +50,7 @@ export class OnlineGameScene extends Phaser.Scene {
   private projGfx!: Phaser.GameObjects.Graphics;
   private hazGfx!: Phaser.GameObjects.Graphics;
   private zoneGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) zone qui rétrécit
-  private cubeGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) cubes de power-up
+  private cubeSprites = new Map<string, Phaser.GameObjects.Container>(); // (Battle Royale) cubes de power-up, clé = position (fixe)
   private gasGfx!: Phaser.GameObjects.Graphics; // (Portal) voiles de neurotoxine
   private portalGfx!: Phaser.GameObjects.Graphics; // (Portal) anneaux de portails
   private fxTime = 0;
@@ -116,7 +118,8 @@ export class OnlineGameScene extends Phaser.Scene {
     this.drawPitch();
 
     this.zoneGfx = this.add.graphics().setDepth(1);
-    this.cubeGfx = this.add.graphics().setDepth(12);
+    for (const s of this.cubeSprites.values()) s.destroy();
+    this.cubeSprites = new Map();
     this.gasGfx = this.add.graphics().setDepth(12);
     this.portalGfx = this.add.graphics().setDepth(13);
     this.hazGfx = this.add.graphics().setDepth(11);
@@ -344,7 +347,7 @@ export class OnlineGameScene extends Phaser.Scene {
     this.add.rectangle(0, 0, 260, 11, COLORS.healthBack, 0.85).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d).setName('ultback').setStrokeStyle(2, 0x000000, 0.6);
     this.ultFill = this.add.rectangle(0, 0, 0, 11, COLORS.ultReady).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d);
     this.bigText = this.add.text(0, 0, '', { fontFamily: 'system-ui, sans-serif', fontSize: '52px', fontStyle: 'bold', color: '#ffffff', align: 'center' }).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
-    this.quitText = this.add.text(0, 0, '‹ Quitter', { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#d8d8ff', fontStyle: 'bold' }).setScrollFactor(0).setDepth(1005).setInteractive({ useHandCursor: true }).on('pointerup', () => this.leave());
+    this.quitText = makeQuitButton(this, () => this.leave());
     this.layoutHud();
     this.scale.on('resize', this.layoutHud, this);
   }
@@ -565,7 +568,10 @@ export class OnlineGameScene extends Phaser.Scene {
       /* déjà déconnecté */
     }
     if (message) console.warn(message);
-    this.scene.start('OnlineMenu', { zarekId: this.zarekId, modeId: this.mode });
+    // Retour au choix du Zarek (même écran qu'en solo) plutôt qu'au lobby de
+    // connexion — celui qui quitte n'a pas forcément envie de relancer tout
+    // de suite ; s'il veut, « JOUER EN LIGNE » depuis la fiche l'y ramène.
+    this.scene.start('Select', { modeId: this.mode, online: true, selectedId: this.zarekId });
   }
 
   private drawPitch(): void {
@@ -600,18 +606,16 @@ export class OnlineGameScene extends Phaser.Scene {
     this.add.rectangle(width / 2, height / 2, width, height).setStrokeStyle(10, 0x5a6cff, 1).setDepth(7);
 
     for (const b of PORTAL_ARENA.bushes) {
-      this.add.rectangle(b.x + b.w / 2, b.y + b.h / 2, b.w, b.h, 0x2fae57, 0.9).setStrokeStyle(3, 0x53d97b, 0.9).setDepth(8);
-      this.add.rectangle(b.x + b.w / 2, b.y + Math.min(12, b.h * 0.22), b.w - 8, Math.min(12, b.h * 0.24), 0x5fe08d, 0.9).setDepth(8);
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      drawPropAt(this, cx, cy, pickPropKey(BUSH_KEYS, cx, cy), 8);
     }
     for (const o of PORTAL_ARENA.obstacles) {
-      if (o.h >= height - 1) {
-        this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, 0x3a3f66).setStrokeStyle(4, 0x181b33, 1).setDepth(9);
-        const stripes = this.add.graphics().setDepth(9);
-        stripes.fillStyle(0xffcf33, 0.5);
-        for (let y = 0; y < height; y += 90) stripes.fillRect(o.x + 6, y + 30, o.w - 12, 30);
-      } else {
-        this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, 0x3c4a66).setStrokeStyle(4, 0x1b2540, 1).setDepth(9);
-        this.add.rectangle(o.x + o.w / 2, o.y + Math.min(12, o.h * 0.25), o.w - 8, Math.min(14, o.h * 0.28), 0x5f739b).setDepth(9);
+      if (o.h >= height - 1) drawWallDivider(this, o, 9);
+      else {
+        const cx = o.x + o.w / 2;
+        const cy = o.y + o.h / 2;
+        drawPropAt(this, cx, cy, pickPropKey(LAB_CRATE_KEYS, cx, cy), 9);
       }
     }
   }
@@ -659,21 +663,23 @@ export class OnlineGameScene extends Phaser.Scene {
     this.zoneGfx.lineStyle(5, 0xc9a3ff, 0.95).strokeCircle(z.x, z.y, z.r);
   }
 
-  /** (Battle Royale) Cubes de power-up en losanges. */
+  /** (Battle Royale) Cubes de power-up : gemme bakée qui tourne sur elle-même.
+   * Pas d'id stable dans le snapshot → la position (fixe tant qu'il n'est pas
+   * ramassé) sert de clé, même schéma « seen-set » que les avatars. */
   private renderCubes(snap: MatchSnapshot): void {
-    this.cubeGfx.clear();
+    const seen = new Set<string>();
     for (const q of snap.cubes ?? []) {
-      const r = q.r + 2;
-      this.cubeGfx.fillStyle(q.c, 1);
-      this.cubeGfx.lineStyle(2, 0xffffff, 0.85);
-      this.cubeGfx.beginPath();
-      this.cubeGfx.moveTo(q.x, q.y - r);
-      this.cubeGfx.lineTo(q.x + r, q.y);
-      this.cubeGfx.lineTo(q.x, q.y + r);
-      this.cubeGfx.lineTo(q.x - r, q.y);
-      this.cubeGfx.closePath();
-      this.cubeGfx.fillPath();
-      this.cubeGfx.strokePath();
+      const key = `${Math.round(q.x)},${Math.round(q.y)}`;
+      seen.add(key);
+      if (!this.cubeSprites.has(key)) {
+        this.cubeSprites.set(key, createPowerGemVisual(this, q.x, q.y, 12));
+      }
+    }
+    for (const [key, s] of this.cubeSprites) {
+      if (!seen.has(key)) {
+        s.destroy();
+        this.cubeSprites.delete(key);
+      }
     }
   }
 

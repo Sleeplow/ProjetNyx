@@ -5,6 +5,11 @@ export interface Button {
   setPosition(x: number, y: number): void;
   /** Fixe le facteur de défilement du VISUEL ET de la zone cliquable (doivent rester alignés). */
   setScrollFactor(value: number): void;
+  /** Fixe la profondeur du VISUEL ET de la zone cliquable — sinon un autre objet
+   * interactif resté à une profondeur plus haute (ex. un voile plein écran)
+   * absorbe le clic avant qu'il n'atteigne le bouton (Phaser hit-teste en
+   * `topOnly` par défaut, y compris pour des objets invisibles comme la zone). */
+  setDepth(value: number): void;
   destroy(): void;
 }
 
@@ -71,11 +76,52 @@ export function makeButton(
       container.setScrollFactor(value);
       zone.setScrollFactor(value);
     },
+    setDepth: (value) => {
+      container.setDepth(value);
+      zone.setDepth(value);
+    },
     destroy: () => {
       container.destroy();
       zone.destroy();
     },
   };
+}
+
+/**
+ * Petit lien « ‹ Quitter » (texte, coin de l'écran, `scrollFactor` 0) affiché
+ * en PLEINE partie (solo comme en ligne). Un tap ouvre une confirmation
+ * (voile + Quitter/Annuler) avant d'appeler `onConfirm` — un tap accidentel
+ * en plein combat ne doit pas faire abandonner la partie.
+ */
+export function makeQuitButton(scene: Phaser.Scene, onConfirm: () => void): Phaser.GameObjects.Text {
+  const confirm = (): void => {
+    const w = scene.scale.width;
+    const h = scene.scale.height;
+    const dim = scene.add.rectangle(w / 2, h / 2, w, h, 0x000000, 0.6).setScrollFactor(0).setDepth(2000).setInteractive();
+    const msg = scene.add
+      .text(w / 2, h / 2 - 50, 'Abandonner la partie ?', { fontFamily: 'system-ui, sans-serif', fontSize: '26px', color: '#ffffff', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2001);
+    const close = (): void => {
+      dim.destroy();
+      msg.destroy();
+      yes.destroy();
+      no.destroy();
+    };
+    const yes = makeButton(scene, w / 2 - 90, h / 2 + 30, 160, 52, 'Quitter', () => { close(); onConfirm(); }, 0xc0392b);
+    const no = makeButton(scene, w / 2 + 90, h / 2 + 30, 160, 52, 'Annuler', close, 0x3a3466);
+    for (const b of [yes, no]) {
+      b.setScrollFactor(0);
+      b.setDepth(2001);
+    }
+  };
+  return scene.add
+    .text(0, 0, '‹ Quitter', { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#d8d8ff', fontStyle: 'bold' })
+    .setScrollFactor(0)
+    .setDepth(1005)
+    .setInteractive({ useHandCursor: true })
+    .on('pointerup', confirm);
 }
 
 /**

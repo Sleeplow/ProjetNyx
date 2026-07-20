@@ -1,0 +1,38 @@
+{
+  "pack": "kaykit-dungeon",
+  "outDir": "tools/sprite-bake/out",
+  "size": 256,
+  "dirs": 1,
+  "elevDeg": 52,
+  "yawOffsetDeg": 0,
+  "padding": 1.28,
+  "aimBias": 0.06,
+  "animGlbs": [],
+  "characters": [
+    {
+      "name": "Wall",
+      "glb": "tools/kaykit-src/KayKit_Dungeon_Pack_1.1_FREE/Assets/gltf/wall.gltf",
+      "clips": [{ "name": "static", "out": "img", "frames": 1 }]
+    },
+    {
+      "name": "BoxSmall",
+      "glb": "tools/kaykit-src/KayKit_Dungeon_Pack_1.1_FREE/Assets/gltf/box_small.gltf",
+      "clips": [{ "name": "static", "out": "img", "frames": 1 }]
+    },
+    {
+      "name": "BoxLarge",
+      "glb": "tools/kaykit-src/KayKit_Dungeon_Pack_1.1_FREE/Assets/gltf/box_large.gltf",
+      "clips": [{ "name": "static", "out": "img", "frames": 1 }]
+    },
+    {
+      "name": "CratesStacked",
+      "glb": "tools/kaykit-src/KayKit_Dungeon_Pack_1.1_FREE/Assets/gltf/crates_stacked.gltf",
+      "clips": [{ "name": "static", "out": "img", "frames": 1 }]
+    },
+    {
+      "name": "BarrelLarge",
+      "glb": "tools/kaykit-src/KayKit_Dungeon_Pack_1.1_FREE/Assets/gltf/barrel_large.gltf",
+      "clips": [{ "name": "static", "out": "img", "frames": 1 }]
+    }
+  ]
+}

@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { makeButton, nightBackground } from '../ui/widgets';
 import { computeFrame, watchResize, type Frame } from '../ui/layout';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
-import { ZAREK_BY_ID, ZAREKS } from '../zareks/registry';
+import { ZAREKS } from '../zareks/registry';
 
 /** Écran d'accueil — animé pour donner le ton dès l'arrivée. */
 export class MenuScene extends Phaser.Scene {
@@ -28,7 +28,7 @@ export class MenuScene extends Phaser.Scene {
     this.idleY = F.at(0, 168).y;
 
     nightBackground(this);
-    this.buildMascots(w, h, F);
+    this.buildMascots(F);
 
     // Suivi du pointeur : une souris qui survole → on la suit ; en tactile,
     // seul un doigt posé compte (voir update()).
@@ -88,22 +88,50 @@ export class MenuScene extends Phaser.Scene {
     watchResize(this, () => this.scene.restart());
   }
 
-  /** Quelques Zareks « cartoon » qui flottent en arrière-plan et regardent le titre. */
-  private buildMascots(w: number, h: number, F: Frame): void {
-    const macs = [
-      { id: 'zephyr', x: w * 0.15, y: h * 0.54, s: 1.35 },
-      { id: 'atlas', x: w * 0.85, y: h * 0.42, s: 1.15 },
-      { id: 'hecate', x: w * 0.84, y: h * 0.82, s: 1.25 },
-    ];
-    for (const m of macs) {
-      const def = ZAREK_BY_ID[m.id] ?? ZAREKS[0];
+  /**
+   * TOUS les Zareks du registre flottent en arrière-plan et regardent le titre —
+   * automatique, donc un nouveau Zarek apparaît sans toucher cet écran. Placés
+   * aléatoirement (tirage-rejet) dans les bandes gauche/droite, en évitant la
+   * colonne centrale (titre/boutons/indice) et en s'écartant les uns des autres.
+   */
+  private buildMascots(F: Frame): void {
+    const BAND_INNER = 230; // dx design : bord intérieur des bandes (hors colonne UI centrale)
+    const BAND_OUTER = 480; // dx design : bord extérieur (reste dans la boîte de design)
+    const Y_MIN = 70;
+    const Y_MAX = 560;
+    const MIN_DIST = 150; // écart mini entre deux mascottes (unités design)
+    const MAX_TRIES = 40;
+
+    const placed: { dx: number; dy: number }[] = [];
+    const pickSpot = (): { dx: number; dy: number } => {
+      let best = { dx: 0, dy: 0 };
+      let bestScore = -Infinity;
+      for (let i = 0; i < MAX_TRIES; i++) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const dx = side * Phaser.Math.Between(BAND_INNER, BAND_OUTER);
+        const dy = Phaser.Math.Between(Y_MIN, Y_MAX);
+        const score = placed.length === 0 ? Infinity : Math.min(...placed.map((p) => Phaser.Math.Distance.Between(dx, dy, p.dx, p.dy)));
+        if (score >= MIN_DIST) return { dx, dy };
+        if (score > bestScore) {
+          bestScore = score;
+          best = { dx, dy };
+        }
+      }
+      return best; // pas trouvé de place assez isolée : on prend le meilleur essai
+    };
+
+    for (const def of ZAREKS) {
+      const spot = pickSpot();
+      placed.push(spot);
+      const p = F.at(spot.dx, spot.dy);
+      const scale = 1.1 + Math.random() * 0.25;
       const vis = createAvatarVisual(this, def, { isSelf: false, label: '', decor: true });
-      vis.container.setPosition(m.x, m.y).setDepth(-40).setScale(m.s * F.s).setAlpha(0);
-      const aim = Math.atan2(this.idleY - m.y, this.idleX - m.x); // regarde vers le titre au départ
+      vis.container.setPosition(p.x, p.y).setDepth(-40).setScale(scale * F.s).setAlpha(0);
+      const aim = Math.atan2(this.idleY - p.y, this.idleX - p.x); // regarde vers le titre au départ
       vis.setAim(aim);
       this.mascots.push({ vis, aim });
-      this.tweens.add({ targets: vis.container, alpha: 1, duration: 700, delay: 250 });
-      this.tweens.add({ targets: vis.container, y: m.y - 16, duration: 1600 + Math.random() * 700, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+      this.tweens.add({ targets: vis.container, alpha: 1, duration: 700, delay: 250 + Math.random() * 300 });
+      this.tweens.add({ targets: vis.container, y: p.y - 16, duration: 1600 + Math.random() * 700, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
     }
   }
 

@@ -12,6 +12,10 @@ export interface GameModeDef {
   tagline: string;
   /** Description affichée dans la carte du sélecteur. */
   description: string;
+  /** Couleur d'accent de la carte (sélecteur Cover Flow). */
+  accent: number;
+  /** Emoji illustratif affiché sur la carte. */
+  icon: string;
 }
 
 export const BATTLE_ROYALE: GameModeDef = {
@@ -19,6 +23,8 @@ export const BATTLE_ROYALE: GameModeDef = {
   name: 'Battle Royale — Classic',
   tagline: 'Dernier survivant',
   description: '1 joueur contre 4 NPC. La zone se referme, ramasse des cubes de power-up et sois le dernier en vie.',
+  accent: 0x6a4dff,
+  icon: '🏆',
 };
 
 export const BATTLE_ROYALE_PORTAL: GameModeDef = {
@@ -26,6 +32,8 @@ export const BATTLE_ROYALE_PORTAL: GameModeDef = {
   name: 'Battle Royale — Portal',
   tagline: 'Portails & neurotoxine',
   description: 'Grande salle envahie par la neurotoxine. Prends un portail VERT pour fuir vers le refuge, exploite les portails itinérants… mais le refuge finit par se remplir aussi.',
+  accent: 0x2fb8a0,
+  icon: '🌀',
 };
 
 export const BRAWL_BALL: GameModeDef = {
@@ -33,6 +41,8 @@ export const BRAWL_BALL: GameModeDef = {
   name: 'Brawl Ball',
   tagline: 'Football 3 v 3',
   description: 'Deux équipes de 3. Attrape la balle et marque dans le but adverse. Premier à 2 buts — ou but en or après 2 minutes.',
+  accent: 0xff8a3d,
+  icon: '⚽',
 };
 
 /** Ordre affiché dans le sélecteur (roulette). */

@@ -1,0 +1,38 @@
+{
+  "pack": "kaykit-forest",
+  "outDir": "tools/sprite-bake/out",
+  "size": 256,
+  "dirs": 1,
+  "elevDeg": 52,
+  "yawOffsetDeg": 0,
+  "padding": 1.28,
+  "aimBias": 0.06,
+  "animGlbs": [],
+  "characters": [
+    {
+      "name": "Rock1A",
+      "glb": "tools/kaykit-src/KayKit_Forest_Nature_Pack_1.0_FREE/Assets/gltf/Rock_1_A_Color1.gltf",
+      "clips": [{ "name": "static", "out": "img", "frames": 1 }]
+    },
+    {
+      "name": "Rock1G",
+      "glb": "tools/kaykit-src/KayKit_Forest_Nature_Pack_1.0_FREE/Assets/gltf/Rock_1_G_Color1.gltf",
+      "clips": [{ "name": "static", "out": "img", "frames": 1 }]
+    },
+    {
+      "name": "Rock3C",
+      "glb": "tools/kaykit-src/KayKit_Forest_Nature_Pack_1.0_FREE/Assets/gltf/Rock_3_C_Color1.gltf",
+      "clips": [{ "name": "static", "out": "img", "frames": 1 }]
+    },
+    {
+      "name": "Bush1A",
+      "glb": "tools/kaykit-src/KayKit_Forest_Nature_Pack_1.0_FREE/Assets/gltf/Bush_1_A_Color1.gltf",
+      "clips": [{ "name": "static", "out": "img", "frames": 1 }]
+    },
+    {
+      "name": "Bush2C",
+      "glb": "tools/kaykit-src/KayKit_Forest_Nature_Pack_1.0_FREE/Assets/gltf/Bush_2_C_Color1.gltf",
+      "clips": [{ "name": "static", "out": "img", "frames": 1 }]
+    }
+  ]
+}

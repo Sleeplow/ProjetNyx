@@ -1,0 +1,24 @@
+{
+  "pack": "kaykit-adventurers",
+  "outDir": "tools/sprite-bake/out",
+  "size": 256,
+  "dirs": 8,
+  "elevDeg": 52,
+  "yawOffsetDeg": 0,
+  "padding": 1.28,
+  "aimBias": 0.06,
+  "animGlbs": [
+    "tools/kaykit-src/KayKit_Adventurers_2.0_FREE/Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
+    "tools/kaykit-src/KayKit_Adventurers_2.0_FREE/Animations/gltf/Rig_Medium/Rig_Medium_MovementBasic.glb"
+  ],
+  "characters": [
+    {
+      "name": "Barbarian",
+      "glb": "tools/kaykit-src/KayKit_Adventurers_2.0_FREE/Characters/gltf/Barbarian.glb",
+      "clips": [
+        { "name": "Idle_A", "out": "idle", "frames": 1, "stillAt": 0.4 },
+        { "name": "Walking_A", "out": "walk", "frames": 8 }
+      ]
+    }
+  ]
+}

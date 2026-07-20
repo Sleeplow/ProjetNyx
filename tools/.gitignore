@@ -1,0 +1,6 @@
+# Raw 3D source packs (drop the extracted pack here; it's the input to the bake,
+# not something we ship). KayKit etc. are CC0 but large — keep them out of git.
+kaykit-src/
+
+# Generated sprite sheets (bake output). Re-created by the sprite-bake skill.
+sprite-bake/out/

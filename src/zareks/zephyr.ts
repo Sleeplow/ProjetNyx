@@ -40,4 +40,13 @@ export const ZEPHYR: ZarekDef = {
     slowFactor: 1,
   },
   ultChargePerDamage: 0.06,
+  sprite: {
+    dirs: 8,
+    yawOffsetDeg: 90, // même bake camera qu'Atlas → même calibration
+    spin: -1,
+    scale: 0.405,
+    footY: 0,
+    idle: { key: 'zephyr_idle', cols: 1, frameRate: 1 },
+    walk: { key: 'zephyr_walk', cols: 8, frameRate: 10 },
+  },
 };

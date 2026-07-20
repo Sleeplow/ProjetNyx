@@ -123,6 +123,36 @@ export interface ZarekDef {
    * soit plusieurs salves qui touchent — pas une seule.
    */
   ultChargePerDamage: number;
+  /** Rendu en sprite 3D→2D (skill `sprite-bake`) au lieu des formes vectorielles. Absent = rendu vectoriel (par défaut). */
+  sprite?: ZarekSpriteDef;
+}
+
+/** Une sheet baked (voir `.claude/skills/sprite-bake`) : lignes = directions, colonnes = frames. */
+export interface SpriteAnimDef {
+  /** Clé de l'asset chargé via `this.load.spritesheet` (voir BootScene). */
+  key: string;
+  cols: number;
+  frameRate: number;
+}
+
+/** Rendu sprite d'un Zarek : jeu d'animations baked depuis un modèle 3D. */
+export interface ZarekSpriteDef {
+  /** Nombre de directions (lignes) des sheets — doit être identique pour idle/walk. */
+  dirs: number;
+  /**
+   * Rotation (degrés) à ajouter à l'angle écran avant de choisir la ligne, pour
+   * aligner la convention de la sheet (rangée 0 = quelle direction ?) sur l'angle
+   * écran du jeu (0 = droite, sens horaire). Calibré à l'œil sur une capture.
+   */
+  yawOffsetDeg: number;
+  /** Sens de rotation de la sheet vs l'angle écran (−1 si les rangées tournent à l'inverse). */
+  spin: 1 | -1;
+  /** Échelle d'affichage (les frames baked font 256×256 par défaut). */
+  scale: number;
+  /** Décalage vertical (px) pour poser les pieds au sol comme l'avatar vectoriel. */
+  footY: number;
+  idle: SpriteAnimDef;
+  walk: SpriteAnimDef;
 }
 
 /** Rectangle simple (buissons, obstacles). */

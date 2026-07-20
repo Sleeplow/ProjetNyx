@@ -77,7 +77,7 @@ export class SoccerScene extends Phaser.Scene {
     this.ball = new Ball(this, this.pitch.ballStart.x, this.pitch.ballStart.y);
 
     this.playerController = new PlayerController(this);
-    this.hud = new SoccerHud(this);
+    this.hud = new SoccerHud(this, () => this.quitMatch());
     this.aimReticle = this.add.circle(0, 0, 10, COLORS.poison, 0.12).setStrokeStyle(2, COLORS.poison, 0.9).setDepth(13).setVisible(false);
     this.kickGuide = this.add.graphics().setDepth(13);
 
@@ -685,6 +685,13 @@ export class SoccerScene extends Phaser.Scene {
         modeId: 'brawl-ball',
       });
     });
+  }
+
+  /** Abandon volontaire (bouton « Quitter ») : retour direct au choix du Zarek, pas d'écran de résultat. */
+  private quitMatch(): void {
+    if (this.phase === 'ended') return;
+    this.phase = 'ended';
+    this.scene.start('Select', { modeId: 'brawl-ball', online: false, selectedId: this.selectedZarekId });
   }
 
   // ---------- Effets visuels ----------

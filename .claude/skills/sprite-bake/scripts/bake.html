@@ -1,0 +1,193 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>sprite-bake</title>
+<style>
+  html, body { margin: 0; background: #202030; }
+  #c { display: block; }
+</style>
+<canvas id="c"></canvas>
+<script type="importmap">
+  { "imports": { "three": "/node_modules/three/build/three.module.js" } }
+</script>
+<script type="module">
+  import * as THREE from 'three';
+  import { GLTFLoader } from '/node_modules/three/examples/jsm/loaders/GLTFLoader.js';
+
+  const state = {};
+
+  /** Renderer + scene + orthographic camera + lights. Transparent background so
+   * the baked frames drop straight onto the game with no matte to key out. */
+  function init(cfg) {
+    const size = cfg.size ?? 256;
+    const canvas = document.getElementById('c');
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(1);
+    renderer.setSize(size, size, false);
+    renderer.setClearColor(0x000000, 0);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    const scene = new THREE.Scene();
+    // Soft, KayKit-friendly lighting: broad sky/ground fill + a key light from
+    // the upper front-left so the chibi volumes read without harsh shadows.
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x505066, 2.1);
+    scene.add(hemi);
+    const key = new THREE.DirectionalLight(0xffffff, 2.2);
+    key.position.set(-3, 6, 4);
+    scene.add(key);
+    const rim = new THREE.DirectionalLight(0xbcd2ff, 0.7);
+    rim.position.set(2, 3, -4);
+    scene.add(rim);
+
+    const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
+
+    Object.assign(state, { renderer, scene, cam, size, root: new THREE.Group() });
+    scene.add(state.root);
+  }
+
+  /** Load a character glb (mesh + skeleton) and an animation glb (shared rig);
+   * bind the animation clips to the character via one AnimationMixer. Because
+   * both use Rig_Medium (identical bone names), the clips retarget for free. */
+  async function loadModel(charUrl, animUrls, cfg) {
+    const loader = new GLTFLoader();
+    const urls = Array.isArray(animUrls) ? animUrls : [animUrls];
+    const [charGltf, ...animGltfs] = await Promise.all([loader.loadAsync(charUrl), ...urls.map((u) => loader.loadAsync(u))]);
+
+    // Clear any previous model.
+    while (state.root.children.length) state.root.remove(state.root.children[0]);
+    const model = charGltf.scene;
+    model.traverse((o) => {
+      if (o.isMesh) {
+        o.frustumCulled = false;
+        if (o.material) o.material.metalness = 0; // KayKit is matte; kill spurious specular
+      }
+    });
+    state.pivot = new THREE.Group(); // yaw pivot for the 8 directions
+    state.pivot.add(model);
+    state.root.add(state.pivot);
+    state.model = model;
+
+    state.mixer = new THREE.AnimationMixer(model);
+    state.clips = {};
+    for (const g of animGltfs) for (const clip of g.animations) state.clips[clip.name] = clip;
+
+    // Frame the model: bounding-sphere fit is rotation-invariant, so the
+    // character never jumps in size as it turns through the 8 directions.
+    const box = new THREE.Box3().setFromObject(model);
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    state.center = sphere.center.clone();
+    state.radius = sphere.radius;
+    state.footY = box.min.y;
+
+    layoutCamera(cfg);
+    return { clips: Object.keys(state.clips), radius: state.radius };
+  }
+
+  /**
+   * Modèle PROCÉDURAL (pas de fichier source) : utile pour de petits objets
+   * simples (gemme, pièce…) où une géométrie three.js suffit. Suit le même
+   * contrat que `loadModel` (pivot/center/radius/layoutCamera) pour que
+   * `bakeSheet` fonctionne à l'identique — ici on bake typiquement une SEULE
+   * direction par « frame » : la grille obtenue (dirs × 1) devient une
+   * animation de rotation jouée en boucle côté client (le tour sur lui-même).
+   */
+  function loadPrimitive(kind, cfg) {
+    while (state.root.children.length) state.root.remove(state.root.children[0]);
+    let geo;
+    if (kind === 'gem') {
+      geo = new THREE.OctahedronGeometry(1, 0); // octaèdre = silhouette « diamant » classique
+    } else {
+      geo = new THREE.IcosahedronGeometry(1, 0);
+    }
+    const mat = new THREE.MeshStandardMaterial({
+      color: cfg.color ?? 0x66e0ff,
+      metalness: 0.25,
+      roughness: 0.12,
+      emissive: cfg.emissive ?? 0x0c4a52,
+      emissiveIntensity: cfg.emissiveIntensity ?? 0.55,
+      flatShading: true,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.scale.set(1, cfg.stretchY ?? 1.3, 1); // un peu allongé, plus « taille diamant » qu'un octaèdre régulier
+    state.pivot = new THREE.Group();
+    state.pivot.add(mesh);
+    state.root.add(state.pivot);
+    state.model = mesh;
+    state.mixer = null;
+    state.clips = {};
+
+    const box = new THREE.Box3().setFromObject(mesh);
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    state.center = sphere.center.clone();
+    state.radius = sphere.radius;
+    layoutCamera(cfg);
+    return { clips: [], radius: state.radius };
+  }
+
+  function layoutCamera(cfg) {
+    const elev = THREE.MathUtils.degToRad(cfg.elevDeg ?? 52);
+    const azim = THREE.MathUtils.degToRad(cfg.azimDeg ?? 0);
+    // Aim a touch below the sphere center so the feet sit lower in frame (room
+    // for the head), like a character standing on the ground.
+    const aim = state.center.clone();
+    aim.y -= state.radius * (cfg.aimBias ?? 0.12);
+
+    const dir = new THREE.Vector3(Math.sin(azim) * Math.cos(elev), Math.sin(elev), Math.cos(azim) * Math.cos(elev));
+    state.cam.position.copy(aim).addScaledVector(dir, state.radius * 4);
+    state.cam.up.set(0, 1, 0);
+    state.cam.lookAt(aim);
+
+    const pad = cfg.padding ?? 1.12;
+    const r = state.radius * pad;
+    state.cam.left = -r;
+    state.cam.right = r;
+    state.cam.top = r;
+    state.cam.bottom = -r;
+    state.cam.near = 0.01;
+    state.cam.far = state.radius * 10;
+    state.cam.updateProjectionMatrix();
+    state.yawOffset = THREE.MathUtils.degToRad(cfg.yawOffsetDeg ?? 0);
+  }
+
+  function renderPose(dirIndex, dirs, timeSec, clipName) {
+    state.pivot.rotation.y = state.yawOffset + (dirIndex / dirs) * Math.PI * 2;
+    const clip = state.clips[clipName];
+    if (clip && state.mixer) {
+      state.mixer.setTime(0); // reset so setTime is absolute, not cumulative
+      state.action?.stop();
+      state.action = state.mixer.clipAction(clip);
+      state.action.reset().play();
+      state.mixer.setTime(timeSec);
+    }
+    state.renderer.render(state.scene, state.cam);
+  }
+
+  /**
+   * Bake one animation into a sprite sheet: rows = 8 directions, columns =
+   * animation frames sampled evenly across the clip. Composited in-browser so
+   * we hand back a single PNG (+ metadata) instead of hundreds of round-trips.
+   */
+  async function bakeSheet(cfg) {
+    const dirs = cfg.dirs ?? 8;
+    const frames = cfg.frames ?? 1;
+    const size = state.size;
+    const clip = state.clips[cfg.clip];
+    const dur = clip ? clip.duration : 0;
+
+    const sheet = document.createElement('canvas');
+    sheet.width = size * frames;
+    sheet.height = size * dirs;
+    const ctx = sheet.getContext('2d');
+
+    for (let d = 0; d < dirs; d++) {
+      for (let f = 0; f < frames; f++) {
+        // Sample across the loop without duplicating the wrap frame.
+        const t = frames > 1 ? (f / frames) * dur : dur * (cfg.stillAt ?? 0.5);
+        renderPose(d, dirs, t, cfg.clip);
+        ctx.drawImage(state.renderer.domElement, f * size, d * size);
+      }
+    }
+    return { dataURL: sheet.toDataURL('image/png'), frameW: size, frameH: size, cols: frames, rows: dirs, dirs, frames, clip: cfg.clip };
+  }
+
+  window.__bake = { init, loadModel, loadPrimitive, bakeSheet, renderPose, ready: true };
+</script>

@@ -49,8 +49,8 @@ export const HECATE: ZarekDef = {
   ultChargePerDamage: 0.06,
   sprite: {
     dirs: 8,
-    yawOffsetDeg: 270,
-    spin: 1,
+    yawOffsetDeg: 90,
+    spin: -1,
     scale: 0.405,
     footY: 0,
     idle: { key: 'hecate_idle', cols: 1, frameRate: 1 },

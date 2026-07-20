@@ -137,10 +137,10 @@ export class SelectScene extends Phaser.Scene {
     this.add.rectangle(panel.x, panel.y, F.px(820), F.px(300), 0x141130, 0.92).setStrokeStyle(3, 0x6a4dff).setDepth(1);
 
     // Colonne gauche : avatar + nom + rôle + capacités.
-    const avatar = F.at(-260, 295);
+    const avatar = F.at(-260, 320);
     this.ficheAvatarX = avatar.x;
     this.ficheAvatarY = avatar.y;
-    this.ficheScale = 2.1 * F.s;
+    this.ficheScale = 1.5 * F.s;
     const nameP = F.at(-260, 369);
     this.nameText = this.add.text(nameP.x, nameP.y, '', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(26), color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(2);
     const roleP = F.at(-260, 399);
@@ -176,7 +176,7 @@ export class SelectScene extends Phaser.Scene {
     this.ficheAvatar?.destroy();
     this.ficheAvatar = createAvatarVisual(this, z, { isSelf: false, label: '', decor: true });
     this.ficheAvatar.container.setPosition(this.ficheAvatarX, this.ficheAvatarY).setScale(this.ficheScale).setDepth(2);
-    this.ficheAvatar.setAim(0.35);
+    this.ficheAvatar.setAim(Math.PI / 2); // face à la caméra (même convention que « bas » en jeu)
 
     this.nameText.setText(z.name);
     this.roleText.setText(roleLabel(z.role));

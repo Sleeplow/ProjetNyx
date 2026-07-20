@@ -82,6 +82,47 @@
     return { clips: Object.keys(state.clips), radius: state.radius };
   }
 
+  /**
+   * Modèle PROCÉDURAL (pas de fichier source) : utile pour de petits objets
+   * simples (gemme, pièce…) où une géométrie three.js suffit. Suit le même
+   * contrat que `loadModel` (pivot/center/radius/layoutCamera) pour que
+   * `bakeSheet` fonctionne à l'identique — ici on bake typiquement une SEULE
+   * direction par « frame » : la grille obtenue (dirs × 1) devient une
+   * animation de rotation jouée en boucle côté client (le tour sur lui-même).
+   */
+  function loadPrimitive(kind, cfg) {
+    while (state.root.children.length) state.root.remove(state.root.children[0]);
+    let geo;
+    if (kind === 'gem') {
+      geo = new THREE.OctahedronGeometry(1, 0); // octaèdre = silhouette « diamant » classique
+    } else {
+      geo = new THREE.IcosahedronGeometry(1, 0);
+    }
+    const mat = new THREE.MeshStandardMaterial({
+      color: cfg.color ?? 0x66e0ff,
+      metalness: 0.25,
+      roughness: 0.12,
+      emissive: cfg.emissive ?? 0x0c4a52,
+      emissiveIntensity: cfg.emissiveIntensity ?? 0.55,
+      flatShading: true,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.scale.set(1, cfg.stretchY ?? 1.3, 1); // un peu allongé, plus « taille diamant » qu'un octaèdre régulier
+    state.pivot = new THREE.Group();
+    state.pivot.add(mesh);
+    state.root.add(state.pivot);
+    state.model = mesh;
+    state.mixer = null;
+    state.clips = {};
+
+    const box = new THREE.Box3().setFromObject(mesh);
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    state.center = sphere.center.clone();
+    state.radius = sphere.radius;
+    layoutCamera(cfg);
+    return { clips: [], radius: state.radius };
+  }
+
   function layoutCamera(cfg) {
     const elev = THREE.MathUtils.degToRad(cfg.elevDeg ?? 52);
     const azim = THREE.MathUtils.degToRad(cfg.azimDeg ?? 0);
@@ -148,5 +189,5 @@
     return { dataURL: sheet.toDataURL('image/png'), frameW: size, frameH: size, cols: frames, rows: dirs, dirs, frames, clip: cfg.clip };
   }
 
-  window.__bake = { init, loadModel, bakeSheet, renderPose, ready: true };
+  window.__bake = { init, loadModel, loadPrimitive, bakeSheet, renderPose, ready: true };
 </script>

@@ -1,0 +1,19 @@
+{
+  "pack": "primitives",
+  "outDir": "tools/sprite-bake/out",
+  "size": 128,
+  "dirs": 16,
+  "elevDeg": 18,
+  "yawOffsetDeg": 0,
+  "padding": 1.3,
+  "aimBias": 0,
+  "animGlbs": [],
+  "characters": [
+    {
+      "name": "PowerGem",
+      "primitive": "gem",
+      "primitiveOpts": { "color": 6742271, "emissive": 805458, "emissiveIntensity": 0.6, "stretchY": 1.3 },
+      "clips": [{ "name": "spin", "out": "spin", "frames": 1 }]
+    }
+  ]
+}

@@ -22,9 +22,16 @@ export class BootScene extends Phaser.Scene {
       this.load.spritesheet(s.walk.key, `sprites/${z.id}/walk.png`, { frameWidth: 256, frameHeight: 256 });
     }
     for (const p of PROPS) this.load.image(p.key, `props/${p.file}`);
+    // Gemme de cube de puissance : sheet de 16 frames (une par angle de
+    // rotation), baké en primitive (octaèdre) — jouées en boucle, ça mime un
+    // vrai tour sur elle-même en 3D plutôt qu'une simple rotation 2D à plat.
+    this.load.spritesheet('power_gem', 'props/powergem.png', { frameWidth: 128, frameHeight: 128 });
   }
 
   create(): void {
+    if (!this.anims.exists('power_gem_spin')) {
+      this.anims.create({ key: 'power_gem_spin', frames: this.anims.generateFrameNumbers('power_gem', { start: 0, end: 15 }), frameRate: 14, repeat: -1 });
+    }
     this.scene.start('Menu');
   }
 }

@@ -1,5 +1,9 @@
 import Phaser from 'phaser';
-import { COLORS, POWER_CUBE } from '../config/constants';
+import { POWER_CUBE } from '../config/constants';
+
+/** Échelle d'affichage de la gemme bakée (128px) — aussi utilisée par le rendu
+ * en ligne (`OnlineGameScene`) pour que solo et en ligne se ressemblent. */
+export const GEM_SCALE = 0.35;
 
 /** Un cube de power-up ramassable (bonus de PV max + dégâts). */
 export class PowerCube {
@@ -8,23 +12,17 @@ export class PowerCube {
   alive = true;
   /** Temps passé hors de la zone sûre (ms) — au-delà du seuil, le cube disparaît. */
   outsideMs = 0;
-  private readonly sprite: Phaser.GameObjects.Rectangle;
+  private readonly sprite: Phaser.GameObjects.Sprite;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     this.x = x;
     this.y = y;
-    const s = POWER_CUBE.radius * 2;
-    this.sprite = scene.add
-      .rectangle(x, y, s, s, COLORS.powerCube, 0.9)
-      .setStrokeStyle(2, 0xffffff, 0.8)
-      .setAngle(45)
-      .setDepth(10);
-    // Petite pulsation pour attirer l'œil.
+    this.sprite = scene.add.sprite(x, y, 'power_gem').setScale(GEM_SCALE).setDepth(10).play('power_gem_spin');
+    // Léger flottement vertical, en plus de la rotation 3D — accroche l'œil.
     scene.tweens.add({
       targets: this.sprite,
-      scaleX: 1.2,
-      scaleY: 1.2,
-      duration: 700,
+      y: y - 6,
+      duration: 900,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.inOut',

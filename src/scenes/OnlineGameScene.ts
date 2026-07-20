@@ -13,6 +13,7 @@ import { makeButton, type Button } from '../ui/widgets';
 import { safeInsets } from '../ui/layout';
 import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
+import { GEM_SCALE } from '../core/PowerCube';
 import { drawCartoonPitch } from '../render/pitchRender';
 import { drawChainBolt } from '../render/fx';
 import type { MatchSnapshot, SnapPlayer, FxEvent } from '../shared/game/snapshot';
@@ -48,7 +49,7 @@ export class OnlineGameScene extends Phaser.Scene {
   private projGfx!: Phaser.GameObjects.Graphics;
   private hazGfx!: Phaser.GameObjects.Graphics;
   private zoneGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) zone qui rétrécit
-  private cubeGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) cubes de power-up
+  private cubeSprites = new Map<string, Phaser.GameObjects.Sprite>(); // (Battle Royale) cubes de power-up, clé = position (fixe)
   private gasGfx!: Phaser.GameObjects.Graphics; // (Portal) voiles de neurotoxine
   private portalGfx!: Phaser.GameObjects.Graphics; // (Portal) anneaux de portails
   private fxTime = 0;
@@ -116,7 +117,8 @@ export class OnlineGameScene extends Phaser.Scene {
     this.drawPitch();
 
     this.zoneGfx = this.add.graphics().setDepth(1);
-    this.cubeGfx = this.add.graphics().setDepth(12);
+    for (const s of this.cubeSprites.values()) s.destroy();
+    this.cubeSprites = new Map();
     this.gasGfx = this.add.graphics().setDepth(12);
     this.portalGfx = this.add.graphics().setDepth(13);
     this.hazGfx = this.add.graphics().setDepth(11);
@@ -659,21 +661,25 @@ export class OnlineGameScene extends Phaser.Scene {
     this.zoneGfx.lineStyle(5, 0xc9a3ff, 0.95).strokeCircle(z.x, z.y, z.r);
   }
 
-  /** (Battle Royale) Cubes de power-up en losanges. */
+  /** (Battle Royale) Cubes de power-up : gemme bakée qui tourne sur elle-même.
+   * Pas d'id stable dans le snapshot → la position (fixe tant qu'il n'est pas
+   * ramassé) sert de clé, même schéma « seen-set » que les avatars. */
   private renderCubes(snap: MatchSnapshot): void {
-    this.cubeGfx.clear();
+    const seen = new Set<string>();
     for (const q of snap.cubes ?? []) {
-      const r = q.r + 2;
-      this.cubeGfx.fillStyle(q.c, 1);
-      this.cubeGfx.lineStyle(2, 0xffffff, 0.85);
-      this.cubeGfx.beginPath();
-      this.cubeGfx.moveTo(q.x, q.y - r);
-      this.cubeGfx.lineTo(q.x + r, q.y);
-      this.cubeGfx.lineTo(q.x, q.y + r);
-      this.cubeGfx.lineTo(q.x - r, q.y);
-      this.cubeGfx.closePath();
-      this.cubeGfx.fillPath();
-      this.cubeGfx.strokePath();
+      const key = `${Math.round(q.x)},${Math.round(q.y)}`;
+      seen.add(key);
+      if (!this.cubeSprites.has(key)) {
+        const s = this.add.sprite(q.x, q.y, 'power_gem').setScale(GEM_SCALE).setDepth(12).play('power_gem_spin');
+        this.tweens.add({ targets: s, y: q.y - 6, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+        this.cubeSprites.set(key, s);
+      }
+    }
+    for (const [key, s] of this.cubeSprites) {
+      if (!seen.has(key)) {
+        s.destroy();
+        this.cubeSprites.delete(key);
+      }
     }
   }
 

@@ -102,6 +102,27 @@ you can reconstruct relative scale at display time: **display scale ∝ radius**
 Pick one prop as a reference (radius → a good on-screen size for it), then
 scale the others by the ratio of their radius to the reference's.
 
+## Procedural primitives (no source model at all)
+For a small simple shape (a gem/coin-style pickup, an icon), you don't need to
+source a file — a character entry can use `"primitive"` instead of `"glb"` to
+build the mesh directly in three.js (currently: `"gem"` = octahedron, the
+classic faceted-diamond silhouette). Useful trick: bake it turning through
+**many directions at `frames: 1`** (e.g. `dirs: 16`), and instead of treating
+the output rows as facing-states, play them **in sequence as a looping
+animation** client-side — that fakes a true 3D Y-axis spin (a genuinely
+convincing "rotating collectible", far better than a flat 2D rotation tween).
+```jsonc
+{
+  "name": "PowerGem",
+  "primitive": "gem",
+  "primitiveOpts": { "color": 6742271, "emissive": 805458, "stretchY": 1.3 },
+  "clips": [{ "name": "spin", "out": "spin", "frames": 1 }]
+}
+```
+(`dirs` for this job controls how many spin frames get baked — set it high,
+e.g. 16–24, for a smooth loop; `primitiveOpts` colors are decimal, not hex
+strings — `0x66e0ff` → `6714111`.)
+
 ## KayKit `Rig_Medium` clip reference
 All KayKit "Adventurers/Skeletons/…" characters share `Rig_Medium`, so the same
 animation glbs drive every character. Useful clips:

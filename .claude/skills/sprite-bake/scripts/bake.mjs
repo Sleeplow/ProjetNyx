@@ -69,8 +69,12 @@ try {
   const manifest = { pack: job.pack ?? 'kaykit', size: cfg.size, dirs: job.dirs ?? 8, characters: {} };
 
   for (const ch of job.characters) {
-    const charUrl = '/' + ch.glb.replace(/^\/+/, '');
-    const loaded = await page.evaluate(async (a) => window.__bake.loadModel(a.charUrl, a.animUrls, a.cfg), { charUrl, animUrls, cfg });
+    const loaded = ch.primitive
+      ? await page.evaluate((a) => window.__bake.loadPrimitive(a.kind, a.cfg), { kind: ch.primitive, cfg: { ...cfg, ...ch.primitiveOpts } })
+      : await page.evaluate(
+          async (a) => window.__bake.loadModel(a.charUrl, a.animUrls, a.cfg),
+          { charUrl: '/' + ch.glb.replace(/^\/+/, ''), animUrls, cfg },
+        );
     console.log(`\n[${ch.name}] clips=${loaded.clips.length} radius=${loaded.radius.toFixed(2)}`);
     // Rayon de la sphère englobante (unités du modèle) : le cadrage normalise
     // chaque bake pour REMPLIR le canevas, donc la taille relative entre deux

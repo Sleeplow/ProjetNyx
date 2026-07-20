@@ -45,7 +45,7 @@ export const ATLAS: ZarekDef = {
     dirs: 8,
     yawOffsetDeg: 270, // calibré in-game : 0°(droite)→face captée à tort ; décalé pour que bas=face, haut=dos
     spin: 1,
-    scale: 0.45,
+    scale: 0.405, // -10% (retour utilisateur : trop gros à 0.45)
     footY: 0,
     idle: { key: 'atlas_idle', cols: 1, frameRate: 1 },
     walk: { key: 'atlas_walk', cols: 8, frameRate: 10 },

@@ -14,6 +14,7 @@ import { safeInsets } from '../ui/layout';
 import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { createPowerGemVisual } from '../core/PowerCube';
+import { BUSH_KEYS, LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider } from '../render/props';
 import { drawCartoonPitch } from '../render/pitchRender';
 import { drawChainBolt } from '../render/fx';
 import type { MatchSnapshot, SnapPlayer, FxEvent } from '../shared/game/snapshot';
@@ -602,18 +603,16 @@ export class OnlineGameScene extends Phaser.Scene {
     this.add.rectangle(width / 2, height / 2, width, height).setStrokeStyle(10, 0x5a6cff, 1).setDepth(7);
 
     for (const b of PORTAL_ARENA.bushes) {
-      this.add.rectangle(b.x + b.w / 2, b.y + b.h / 2, b.w, b.h, 0x2fae57, 0.9).setStrokeStyle(3, 0x53d97b, 0.9).setDepth(8);
-      this.add.rectangle(b.x + b.w / 2, b.y + Math.min(12, b.h * 0.22), b.w - 8, Math.min(12, b.h * 0.24), 0x5fe08d, 0.9).setDepth(8);
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      drawPropAt(this, cx, cy, pickPropKey(BUSH_KEYS, cx, cy), 8);
     }
     for (const o of PORTAL_ARENA.obstacles) {
-      if (o.h >= height - 1) {
-        this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, 0x3a3f66).setStrokeStyle(4, 0x181b33, 1).setDepth(9);
-        const stripes = this.add.graphics().setDepth(9);
-        stripes.fillStyle(0xffcf33, 0.5);
-        for (let y = 0; y < height; y += 90) stripes.fillRect(o.x + 6, y + 30, o.w - 12, 30);
-      } else {
-        this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, 0x3c4a66).setStrokeStyle(4, 0x1b2540, 1).setDepth(9);
-        this.add.rectangle(o.x + o.w / 2, o.y + Math.min(12, o.h * 0.25), o.w - 8, Math.min(14, o.h * 0.28), 0x5f739b).setDepth(9);
+      if (o.h >= height - 1) drawWallDivider(this, o, 9);
+      else {
+        const cx = o.x + o.w / 2;
+        const cy = o.y + o.h / 2;
+        drawPropAt(this, cx, cy, pickPropKey(LAB_CRATE_KEYS, cx, cy), 9);
       }
     }
   }

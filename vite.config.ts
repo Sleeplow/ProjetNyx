@@ -1,11 +1,10 @@
 import { defineConfig } from 'vite';
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 
-// Identifiant de build injecté à la compilation : version (package.json) +
-// hash de commit court + date. Affiché à l'écran pour savoir quelle version
-// tourne (utile pour distinguer prod / QA et confirmer un déploiement).
-const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string };
+// Identifiant de build injecté à la compilation : hash de commit court + date.
+// Entièrement dérivé de git → aucune version à bumper manuellement ; il suffit
+// de regarder l'écran pour savoir exactement quel commit tourne (utile pour
+// distinguer prod / QA et confirmer un déploiement).
 let sha = 'local';
 try {
   sha = execSync('git rev-parse --short HEAD').toString().trim();
@@ -13,7 +12,7 @@ try {
   // Pas de dépôt git disponible (build hors contexte git) → on garde "local".
 }
 const buildDate = new Date().toISOString().slice(0, 10);
-const buildId = `v${pkg.version} · ${sha} · ${buildDate}`;
+const buildId = `${sha} · ${buildDate}`;
 
 // Configuration Vite : serveur de dev rapide + build de production.
 // `base: './'` garde les chemins relatifs pour un déploiement statique simple

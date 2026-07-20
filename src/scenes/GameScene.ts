@@ -17,9 +17,9 @@ import { PortalSystem } from '../shared/game/portals';
 import { resolveChain } from '../shared/game/chain';
 import { drawChainBolt } from '../render/fx';
 import { ZAREKS, getZarek } from '../zareks/registry';
-import { ROCK_KEYS, BUSH_KEYS, LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider } from '../render/props';
+import { ROCK_KEYS, BUSH_KEYS, LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider, isInBush } from '../render/props';
 import { COLORS, POWER_CUBE, PLAYERS_PER_MATCH, BUSH } from '../config/constants';
-import { clamp, dist, normalize, resolveCircleRect, pointInRect, circleHitsRect } from '../core/geometry';
+import { clamp, dist, normalize, resolveCircleRect, circleHitsRect } from '../core/geometry';
 
 const TAU = Math.PI * 2;
 
@@ -451,7 +451,7 @@ export class GameScene extends Phaser.Scene {
       }
       c.x = clamp(nx, c.def.radius, this.map.width - c.def.radius);
       c.y = clamp(ny, c.def.radius, this.map.height - c.def.radius);
-      c.inBush = this.map.bushes.some((b) => pointInRect(c.x, c.y, b));
+      c.inBush = this.map.bushes.some((b) => isInBush(c.x, c.y, b));
     }
 
     this.separateCombatants();
@@ -466,7 +466,7 @@ export class GameScene extends Phaser.Scene {
         if (this.portals!.tryTeleport(c)) {
           c.x = clamp(c.x, c.def.radius, this.map.width - c.def.radius);
           c.y = clamp(c.y, c.def.radius, this.map.height - c.def.radius);
-          c.inBush = this.map.bushes.some((b) => pointInRect(c.x, c.y, b));
+          c.inBush = this.map.bushes.some((b) => isInBush(c.x, c.y, b));
           c.grantInvuln(TELEPORT_INVULN_MS);
           this.teleportBurst(c.x, c.y);
           if (c.isPlayer) {

@@ -48,6 +48,30 @@ export function propScale(key: string): number {
   return PROPS.find((p) => p.key === key)?.scale ?? 1;
 }
 
+/**
+ * Rayon de camouflage effectif d'un buisson (px) : dérivé de la taille
+ * VISUELLE du sprite réellement affiché (même variante que `pickPropKey` au
+ * rendu), pas de l'ancien rectangle de données (`b.w × b.h`, hérité du
+ * placeholder plat — bien plus grand que le sprite qui l'a remplacé). On
+ * réduit encore ce rayon (facteur < 1) : il faut être bien À L'INTÉRIEUR du
+ * buisson dessiné, pas juste toucher son bord, pour que le camouflage
+ * s'active — sinon on disparaît avant même d'être visuellement dedans.
+ */
+export function bushHideRadius(b: Rect): number {
+  const cx = b.x + b.w / 2;
+  const cy = b.y + b.h / 2;
+  const visualRadius = (BAKE_SIZE / 2) * propScale(pickPropKey(BUSH_KEYS, cx, cy));
+  return visualRadius * 0.55;
+}
+
+/** Un point est-il assez profondément dans le buisson pour se camoufler ? */
+export function isInBush(x: number, y: number, b: Rect): boolean {
+  const cx = b.x + b.w / 2;
+  const cy = b.y + b.h / 2;
+  const r = bushHideRadius(b);
+  return (x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r;
+}
+
 /** Pose un décor baké au sol avec une ombre douce (pour ne pas « flotter »).
  * Partagé entre le solo (`GameScene`) et l'en ligne (`OnlineGameScene`). */
 export function drawPropAt(scene: Phaser.Scene, cx: number, cy: number, key: string, depth: number): void {

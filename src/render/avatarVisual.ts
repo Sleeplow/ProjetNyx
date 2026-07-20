@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import type { ZarekDef } from '../core/types';
+import type { ZarekDef, ZarekSpriteDef } from '../core/types';
 import { COLORS } from '../config/constants';
 
 const EYE_DARK = 0x14102a;
@@ -9,6 +9,12 @@ const EYE_DARK = 0x14102a;
  * l'en ligne (`OnlineGameScene`) pour que les deux soient identiques depuis une
  * seule source : ombre, corps à contour épais, reflet, yeux qui suivent la
  * visée, accessoire de tête selon le rôle, barre de vie, halo d'ultime.
+ *
+ * Deux implémentations derrière la même interface : `createVectorAvatarVisual`
+ * (formes Phaser, tous les Zareks par défaut) et `createSpriteAvatarVisual`
+ * (sheets baked par le skill `sprite-bake` depuis un modèle 3D — seulement les
+ * Zareks avec un `def.sprite`). `createAvatarVisual` choisit automatiquement ;
+ * partout ailleurs dans le code ça reste un simple appel unique.
  */
 export interface AvatarVisual {
   container: Phaser.GameObjects.Container;
@@ -38,6 +44,14 @@ export interface AvatarOptions {
   decor?: boolean;
 }
 
+export function createAvatarVisual(scene: Phaser.Scene, def: ZarekDef, opts: AvatarOptions): AvatarVisual {
+  return def.sprite ? createSpriteAvatarVisual(scene, def, def.sprite, opts) : createVectorAvatarVisual(scene, def, opts);
+}
+
+// ==========================================================================
+// Rendu vectoriel (défaut)
+// ==========================================================================
+
 /** Accessoire de tête selon le rôle (repère local : +x = avant, +y = en travers). */
 function buildAccessory(scene: Phaser.Scene, def: ZarekDef, r: number): Phaser.GameObjects.Container {
   const acc = def.accent;
@@ -65,7 +79,7 @@ function buildAccessory(scene: Phaser.Scene, def: ZarekDef, r: number): Phaser.G
   return scene.add.container(0, 0, parts);
 }
 
-export function createAvatarVisual(scene: Phaser.Scene, def: ZarekDef, opts: AvatarOptions): AvatarVisual {
+function createVectorAvatarVisual(scene: Phaser.Scene, def: ZarekDef, opts: AvatarOptions): AvatarVisual {
   const r = def.radius;
   const barW = opts.barW ?? 58;
 
@@ -148,6 +162,129 @@ export function createAvatarVisual(scene: Phaser.Scene, def: ZarekDef, opts: Ava
       body.setFillStyle(def.color);
       scene.tweens.killTweensOf(container);
       container.setScale(1);
+    },
+    destroy() {
+      container.destroy();
+    },
+  };
+}
+
+// ==========================================================================
+// Rendu sprite (baked 3D→2D, voir `.claude/skills/sprite-bake`)
+// ==========================================================================
+
+/** Index de direction (0..dirs-1) le plus proche d'un angle écran (0 = droite, sens horaire). */
+function dirIndexFor(angleRad: number, s: ZarekSpriteDef): number {
+  const step = (Math.PI * 2) / s.dirs;
+  const a = Phaser.Math.Wrap(s.spin * angleRad + Phaser.Math.DegToRad(s.yawOffsetDeg), 0, Math.PI * 2);
+  return Math.round(a / step) % s.dirs;
+}
+
+/** Enregistre les animations de marche (une par direction) une seule fois par scène+sprite. */
+function ensureWalkAnims(scene: Phaser.Scene, s: ZarekSpriteDef): void {
+  for (let d = 0; d < s.dirs; d++) {
+    const key = `${s.walk.key}_d${d}`;
+    if (scene.anims.exists(key)) continue;
+    const start = d * s.walk.cols;
+    scene.anims.create({
+      key,
+      frames: scene.anims.generateFrameNumbers(s.walk.key, { start, end: start + s.walk.cols - 1 }),
+      frameRate: s.walk.frameRate,
+      repeat: -1,
+    });
+  }
+}
+
+function createSpriteAvatarVisual(scene: Phaser.Scene, def: ZarekDef, s: ZarekSpriteDef, opts: AvatarOptions): AvatarVisual {
+  const r = def.radius;
+  const barW = opts.barW ?? 58;
+  ensureWalkAnims(scene, s);
+
+  const shadow = scene.add.ellipse(0, r * 0.82, r * 1.95, r * 0.82, 0x000000, 0.22);
+  const ultGlow = scene.add.circle(0, 0, r + 8, COLORS.ultReady, 0).setStrokeStyle(4, COLORS.ultReady, 0.9).setVisible(false);
+  scene.tweens.add({ targets: ultGlow, scale: 1.45, alpha: 0.15, duration: 720, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+
+  const sprite = scene.add.sprite(0, s.footY, s.idle.key, 0).setScale(s.scale);
+  const ring = opts.isSelf || opts.teamColor !== undefined ? scene.add.circle(0, r * 0.55, r * 0.85, 0, 0).setStrokeStyle(opts.isSelf ? 4 : 3, opts.isSelf ? COLORS.playerAccent : opts.teamColor!, 0.85) : null;
+
+  const decor = !!opts.decor;
+  const hpFill = decor ? null : scene.add.rectangle(-barW / 2, -(r + 22), barW, 9, COLORS.healthGood).setOrigin(0, 0.5);
+  const cubeText = decor ? null : scene.add.text(0, -(r + 36), '', { fontFamily: 'system-ui, sans-serif', fontSize: '14px', color: '#66e0ff', fontStyle: 'bold' }).setOrigin(0.5, 1);
+
+  const children: Phaser.GameObjects.GameObject[] = [shadow, ultGlow, ...(ring ? [ring] : []), sprite];
+  if (!decor) {
+    const hpBack = scene.add.rectangle(-barW / 2, -(r + 22), barW, 9, COLORS.healthBack).setOrigin(0, 0.5).setStrokeStyle(2, 0x000000, 0.7);
+    const label = scene.add
+      .text(0, r + 6, opts.label, { fontFamily: 'system-ui, sans-serif', fontSize: opts.isSelf ? '15px' : '12px', color: opts.isSelf ? '#ffe066' : '#cfcfe6', fontStyle: opts.isSelf ? 'bold' : 'normal' })
+      .setOrigin(0.5, 0);
+    children.push(hpBack, hpFill!, cubeText!, label);
+  }
+
+  const container = scene.add.container(0, 0, children);
+
+  // La sheet n'a pas de pose « visée seule » : le corps suit le DÉPLACEMENT
+  // (comme un vrai perso 3D qui marche vers où il va), et retombe sur le dernier
+  // angle de visée connu à l'arrêt (même intention que les yeux du rendu vectoriel).
+  let lastX = NaN;
+  let lastY = NaN;
+  let facing = 0;
+  let curDir = 0;
+  let walking = false;
+
+  return {
+    container,
+    setAim(angle) {
+      const x = container.x;
+      const y = container.y;
+      const dx = Number.isNaN(lastX) ? 0 : x - lastX;
+      const dy = Number.isNaN(lastY) ? 0 : y - lastY;
+      lastX = x;
+      lastY = y;
+      const moveDist = Math.hypot(dx, dy);
+      const isMoving = moveDist > 0.35; // filtre le bruit d'arrondi/interpolation réseau
+
+      facing = isMoving ? Math.atan2(dy, dx) : angle;
+      const dir = dirIndexFor(facing, s);
+
+      if (isMoving) {
+        if (!walking || dir !== curDir) sprite.play(`${s.walk.key}_d${dir}`, true);
+      } else if (walking || dir !== curDir || sprite.texture.key !== s.idle.key) {
+        sprite.stop();
+        sprite.setTexture(s.idle.key, dir);
+      }
+      walking = isMoving;
+      curDir = dir;
+    },
+    setHealth(ratio) {
+      if (!hpFill) return;
+      const cl = Phaser.Math.Clamp(ratio, 0, 1);
+      hpFill.width = barW * cl;
+      hpFill.fillColor = cl > 0.35 ? COLORS.healthGood : COLORS.healthLow;
+    },
+    setUltReady(on) {
+      ultGlow.setVisible(on);
+    },
+    setCubes(n) {
+      cubeText?.setText(n > 0 ? `◆${n}` : '');
+    },
+    flashHit() {
+      sprite.setTintFill(0xffffff);
+      scene.tweens.killTweensOf(container);
+      container.setScale(1);
+      scene.tweens.add({ targets: container, scaleX: 1.16, scaleY: 0.84, duration: 80, yoyo: true, ease: 'Quad.out' });
+      scene.time.delayedCall(90, () => sprite.clearTint());
+    },
+    popIn() {
+      scene.tweens.killTweensOf(container);
+      container.setScale(0.3);
+      scene.tweens.add({ targets: container, scaleX: 1, scaleY: 1, duration: 280, ease: 'Back.out' });
+    },
+    reset() {
+      sprite.clearTint();
+      scene.tweens.killTweensOf(container);
+      container.setScale(1);
+      lastX = NaN;
+      lastY = NaN;
     },
     destroy() {
       container.destroy();

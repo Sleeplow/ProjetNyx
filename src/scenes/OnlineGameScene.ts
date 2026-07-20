@@ -13,7 +13,7 @@ import { makeButton, type Button } from '../ui/widgets';
 import { safeInsets } from '../ui/layout';
 import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
-import { GEM_SCALE } from '../core/PowerCube';
+import { createPowerGemVisual } from '../core/PowerCube';
 import { drawCartoonPitch } from '../render/pitchRender';
 import { drawChainBolt } from '../render/fx';
 import type { MatchSnapshot, SnapPlayer, FxEvent } from '../shared/game/snapshot';
@@ -49,7 +49,7 @@ export class OnlineGameScene extends Phaser.Scene {
   private projGfx!: Phaser.GameObjects.Graphics;
   private hazGfx!: Phaser.GameObjects.Graphics;
   private zoneGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) zone qui rétrécit
-  private cubeSprites = new Map<string, Phaser.GameObjects.Sprite>(); // (Battle Royale) cubes de power-up, clé = position (fixe)
+  private cubeSprites = new Map<string, Phaser.GameObjects.Container>(); // (Battle Royale) cubes de power-up, clé = position (fixe)
   private gasGfx!: Phaser.GameObjects.Graphics; // (Portal) voiles de neurotoxine
   private portalGfx!: Phaser.GameObjects.Graphics; // (Portal) anneaux de portails
   private fxTime = 0;
@@ -670,9 +670,7 @@ export class OnlineGameScene extends Phaser.Scene {
       const key = `${Math.round(q.x)},${Math.round(q.y)}`;
       seen.add(key);
       if (!this.cubeSprites.has(key)) {
-        const s = this.add.sprite(q.x, q.y, 'power_gem').setScale(GEM_SCALE).setDepth(12).play('power_gem_spin');
-        this.tweens.add({ targets: s, y: q.y - 6, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
-        this.cubeSprites.set(key, s);
+        this.cubeSprites.set(key, createPowerGemVisual(this, q.x, q.y, 12));
       }
     }
     for (const [key, s] of this.cubeSprites) {

@@ -105,7 +105,7 @@ export class GameScene extends Phaser.Scene {
     this.scatterCubes(POWER_CUBE.initialCount);
 
     this.playerController = new PlayerController(this);
-    this.hud = new Hud(this);
+    this.hud = new Hud(this, () => this.quitMatch());
     // Repère de visée (aperçu de la flaque de potion pendant la charge).
     this.aimReticle = this.add.circle(0, 0, 10, COLORS.poison, 0.12).setStrokeStyle(2, COLORS.poison, 0.9).setDepth(13).setVisible(false);
 
@@ -986,6 +986,13 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(1500, () => {
       this.scene.start('GameOver', { victory, mode: 'battle-royale', modeId: this.modeId, placement: this.placement, zarekId: this.selectedZarekId });
     });
+  }
+
+  /** Abandon volontaire (bouton « Quitter ») : retour direct au choix du Zarek, pas d'écran de résultat. */
+  private quitMatch(): void {
+    if (this.ending) return;
+    this.ending = true;
+    this.scene.start('Select', { modeId: this.modeId, online: false, selectedId: this.selectedZarekId });
   }
 
   // ---------- Effets visuels ----------

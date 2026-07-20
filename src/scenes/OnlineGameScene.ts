@@ -9,7 +9,7 @@ import { ZAREKS, ZAREK_BY_ID } from '../zareks/registry';
 import type { ZarekDef, MapDef } from '../core/types';
 import { stepMovement } from '../shared/game/movement';
 import { clamp, dist } from '../core/geometry';
-import { makeButton, type Button } from '../ui/widgets';
+import { makeButton, makeQuitButton, type Button } from '../ui/widgets';
 import { safeInsets } from '../ui/layout';
 import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
@@ -347,7 +347,7 @@ export class OnlineGameScene extends Phaser.Scene {
     this.add.rectangle(0, 0, 260, 11, COLORS.healthBack, 0.85).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d).setName('ultback').setStrokeStyle(2, 0x000000, 0.6);
     this.ultFill = this.add.rectangle(0, 0, 0, 11, COLORS.ultReady).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d);
     this.bigText = this.add.text(0, 0, '', { fontFamily: 'system-ui, sans-serif', fontSize: '52px', fontStyle: 'bold', color: '#ffffff', align: 'center' }).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
-    this.quitText = this.add.text(0, 0, '‹ Quitter', { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#d8d8ff', fontStyle: 'bold' }).setScrollFactor(0).setDepth(1005).setInteractive({ useHandCursor: true }).on('pointerup', () => this.leave());
+    this.quitText = makeQuitButton(this, () => this.leave());
     this.layoutHud();
     this.scale.on('resize', this.layoutHud, this);
   }
@@ -568,7 +568,10 @@ export class OnlineGameScene extends Phaser.Scene {
       /* déjà déconnecté */
     }
     if (message) console.warn(message);
-    this.scene.start('OnlineMenu', { zarekId: this.zarekId, modeId: this.mode });
+    // Retour au choix du Zarek (même écran qu'en solo) plutôt qu'au lobby de
+    // connexion — celui qui quitte n'a pas forcément envie de relancer tout
+    // de suite ; s'il veut, « JOUER EN LIGNE » depuis la fiche l'y ramène.
+    this.scene.start('Select', { modeId: this.mode, online: true, selectedId: this.zarekId });
   }
 
   private drawPitch(): void {

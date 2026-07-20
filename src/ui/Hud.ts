@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import type { Combatant } from '../core/Combatant';
 import { COLORS } from '../config/constants';
 import { safeInsets } from './layout';
+import { makeQuitButton } from './widgets';
 
 /** Interface tête haute (HUD), fixée à la caméra. */
 export class Hud {
@@ -14,6 +15,7 @@ export class Hud {
   private readonly ultFill: Phaser.GameObjects.Rectangle;
   private readonly survivors: Phaser.GameObjects.Text;
   private readonly cubes: Phaser.GameObjects.Text;
+  private readonly quit: Phaser.GameObjects.Text;
   private readonly warning: Phaser.GameObjects.Text;
   private readonly vignette: Phaser.GameObjects.Rectangle;
   private readonly announce: Phaser.GameObjects.Text;
@@ -21,7 +23,7 @@ export class Hud {
   private static readonly HP_W = 280;
   private pulse = 0;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, onQuit: () => void) {
     this.scene = scene;
     const d = 950;
 
@@ -30,6 +32,7 @@ export class Hud {
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(900);
+    this.quit = makeQuitButton(scene, onQuit);
 
     this.hpBack = scene.add.rectangle(0, 0, Hud.HP_W, 22, COLORS.healthBack, 0.85).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d).setStrokeStyle(2, 0x000000, 0.6);
     this.hpFill = scene.add.rectangle(0, 0, Hud.HP_W, 22, COLORS.healthGood).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d);
@@ -62,7 +65,8 @@ export class Hud {
     this.ultBack.setPosition(hx, hy + 22);
     this.ultFill.setPosition(hx, hy + 22);
     this.survivors.setPosition(w - 20 - i.right, 16 + i.top);
-    this.cubes.setPosition(20 + i.left, 16 + i.top);
+    this.quit.setPosition(20 + i.left, 16 + i.top);
+    this.cubes.setPosition(20 + i.left, 42 + i.top);
     this.warning.setPosition(w / 2, 24 + i.top);
     this.announce.setPosition(w / 2, h / 2 - 40);
   }

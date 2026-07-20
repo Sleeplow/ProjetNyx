@@ -3,6 +3,7 @@ import type { Combatant } from '../core/Combatant';
 import { COLORS } from '../config/constants';
 import { TEAM } from '../config/soccer';
 import { safeInsets } from './layout';
+import { makeQuitButton } from './widgets';
 
 /** HUD du mode Brawl Ball : score + chrono en haut, vie/ult du joueur en bas. */
 export class SoccerHud {
@@ -17,13 +18,15 @@ export class SoccerHud {
   private readonly ultFill: Phaser.GameObjects.Rectangle;
   private readonly respawnText: Phaser.GameObjects.Text;
   private readonly announce: Phaser.GameObjects.Text;
+  private readonly quit: Phaser.GameObjects.Text;
 
   private static readonly HP_W = 280;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, onQuit: () => void) {
     this.scene = scene;
     const d = 950;
 
+    this.quit = makeQuitButton(scene, onQuit);
     this.scoreText = scene.add
       .text(0, 0, '', { fontFamily: 'system-ui, sans-serif', fontSize: '34px', fontStyle: 'bold', color: '#ffffff' })
       .setOrigin(0.5, 0)
@@ -65,6 +68,7 @@ export class SoccerHud {
     const i = safeInsets();
     this.scoreText.setPosition(w / 2, 12 + i.top);
     this.timerText.setPosition(w / 2, 54 + i.top);
+    this.quit.setPosition(20 + i.left, 16 + i.top);
     const hx = 24 + i.left;
     const hy = h - 54 - i.bottom;
     this.hpBack.setPosition(hx, hy);

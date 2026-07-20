@@ -72,7 +72,11 @@ try {
     const charUrl = '/' + ch.glb.replace(/^\/+/, '');
     const loaded = await page.evaluate(async (a) => window.__bake.loadModel(a.charUrl, a.animUrls, a.cfg), { charUrl, animUrls, cfg });
     console.log(`\n[${ch.name}] clips=${loaded.clips.length} radius=${loaded.radius.toFixed(2)}`);
-    manifest.characters[ch.name] = { anims: {} };
+    // Rayon de la sphère englobante (unités du modèle) : le cadrage normalise
+    // chaque bake pour REMPLIR le canevas, donc la taille relative entre deux
+    // props se perd dans l'image seule — la reconstituer au moment de
+    // l'affichage exige ce rayon (échelle d'affichage ∝ radius).
+    manifest.characters[ch.name] = { radius: loaded.radius, anims: {} };
 
     for (const clip of ch.clips) {
       const sheet = await page.evaluate(async (c) => window.__bake.bakeSheet(c), { clip: clip.name, dirs: job.dirs ?? 8, frames: clip.frames ?? 1, stillAt: clip.stillAt });

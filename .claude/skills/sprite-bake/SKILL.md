@@ -80,6 +80,28 @@ Each sheet is a grid: **rows = directions** (top→bottom = direction index 0…
 `cols/rows/frameW/frameH/file` per character per animation so the Phaser loader can
 slice it without guessing.
 
+## Static props (no rig, no animation)
+Decorative/obstacle assets (rocks, bushes, crates…) usually have **no skin and
+no animations** — `list-clips.mjs` reports `skins:0 animations:0`. The same
+pipeline handles them with no code changes:
+- Omit `animGlbs` (or pass `[]`).
+- Give each one a single clip entry with `frames: 1` and any `name` (it won't
+  match a real clip — that's fine, `renderPose` just skips animating and
+  renders the static bind pose): `{ "name": "static", "out": "img", "frames": 1 }`.
+- Usually `dirs: 1` — a static prop doesn't need to "face" anything the way a
+  controllable character does. Get visual variety from the pack's own model
+  variants (packs like KayKit Forest ship many hand-authored variants per
+  category — `Rock_1_A`…`Rock_1_Q`, `Bush_1_A`…) instead of rotating one model.
+
+**Relative-size gotcha**: the bounding-sphere framing makes EVERY bake fill the
+canvas similarly, regardless of the source mesh's true size — so a pebble and
+a boulder come out looking the same pixel size, and any true size difference
+between two props is lost in the image alone. `manifest.json` records each
+character's `radius` (the bounding-sphere radius in model units) precisely so
+you can reconstruct relative scale at display time: **display scale ∝ radius**.
+Pick one prop as a reference (radius → a good on-screen size for it), then
+scale the others by the ratio of their radius to the reference's.
+
 ## KayKit `Rig_Medium` clip reference
 All KayKit "Adventurers/Skeletons/…" characters share `Rig_Medium`, so the same
 animation glbs drive every character. Useful clips:

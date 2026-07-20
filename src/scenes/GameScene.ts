@@ -17,6 +17,7 @@ import { PortalSystem } from '../shared/game/portals';
 import { resolveChain } from '../shared/game/chain';
 import { drawChainBolt } from '../render/fx';
 import { ZAREKS, getZarek } from '../zareks/registry';
+import { ROCK_KEYS, BUSH_KEYS, pickPropKey, propScale } from '../render/props';
 import { COLORS, POWER_CUBE, PLAYERS_PER_MATCH, BUSH } from '../config/constants';
 import { clamp, dist, normalize, resolveCircleRect, pointInRect, circleHitsRect } from '../core/geometry';
 
@@ -260,16 +261,27 @@ export class GameScene extends Phaser.Scene {
     // Bordure épaisse et vive.
     this.add.rectangle(width / 2, height / 2, width, height).setStrokeStyle(10, 0x7a5cff, 1).setDepth(7);
 
-    // Buissons : vert vif + liseré clair.
+    // Buissons : décor baké (KayKit Forest) — variante stable par position.
     for (const b of this.map.bushes) {
-      this.add.rectangle(b.x + b.w / 2, b.y + b.h / 2, b.w, b.h, 0x2fae57, 0.9).setStrokeStyle(3, 0x53d97b, 0.9).setDepth(8);
-      this.add.rectangle(b.x + b.w / 2, b.y + Math.min(12, b.h * 0.22), b.w - 8, Math.min(12, b.h * 0.24), 0x5fe08d, 0.9).setDepth(8);
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      const key = pickPropKey(BUSH_KEYS, cx, cy);
+      this.drawProp(cx, cy, key, 8);
     }
-    // Obstacles : blocs « pierre » cartoon (face claire + contour épais).
+    // Obstacles : rochers bakés (KayKit Forest) — variante stable par position.
     for (const o of this.map.obstacles) {
-      this.add.rectangle(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, 0x4a4788).setStrokeStyle(4, 0x241f45, 1).setDepth(9);
-      this.add.rectangle(o.x + o.w / 2, o.y + Math.min(12, o.h * 0.25), o.w - 8, Math.min(14, o.h * 0.28), 0x6f69b8).setDepth(9);
+      const cx = o.x + o.w / 2;
+      const cy = o.y + o.h / 2;
+      const key = pickPropKey(ROCK_KEYS, cx, cy);
+      this.drawProp(cx, cy, key, 9);
     }
+  }
+
+  /** Pose un décor baké au sol avec une ombre douce (pour ne pas « flotter »). */
+  private drawProp(cx: number, cy: number, key: string, depth: number): void {
+    const s = propScale(key);
+    this.add.ellipse(cx, cy + 46 * s, 150 * s, 56 * s, 0x000000, 0.22).setDepth(depth - 1);
+    this.add.image(cx, cy, key).setScale(s).setDepth(depth);
   }
 
   /** Décor du tableau Portal : deux salles « labo », cloison métallique, refuge. */

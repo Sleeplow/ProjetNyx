@@ -47,4 +47,13 @@ export const ASTRAPE: ZarekDef = {
   },
   // Charge d'ult au rythme normal (comme les autres mages).
   ultChargePerDamage: 0.06,
+  sprite: {
+    dirs: 8,
+    yawOffsetDeg: 270,
+    spin: 1,
+    scale: 0.405,
+    footY: 0,
+    idle: { key: 'astrape_idle', cols: 1, frameRate: 1 },
+    walk: { key: 'astrape_walk', cols: 8, frameRate: 10 },
+  },
 };

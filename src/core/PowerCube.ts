@@ -3,7 +3,7 @@ import { POWER_CUBE } from '../config/constants';
 
 /** Échelle d'affichage de la gemme bakée (128px) — aussi utilisée par le rendu
  * en ligne (`OnlineGameScene`) pour que solo et en ligne se ressemblent. */
-export const GEM_SCALE = 0.35;
+export const GEM_SCALE = 0.5; // +43% (retour utilisateur : trop petit à 0.35)
 
 /** Un cube de power-up ramassable (bonus de PV max + dégâts). */
 export class PowerCube {

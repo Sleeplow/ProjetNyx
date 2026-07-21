@@ -21,13 +21,22 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET' || !req.url.startsWith('http')) return;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+  // SÉCURITÉ : on ne met en cache QUE nos propres assets (même origine). Sans ça,
+  // une réponse tierce (opaque) ou une erreur pourrait empoisonner le cache et
+  // être resservie plus tard — y compris comme page d'accueil hors-ligne.
+  const sameOrigin = url.origin === self.location.origin;
   event.respondWith(
     (async () => {
       try {
         const res = await fetch(req);
-        const cache = await caches.open(CACHE);
-        cache.put(req, res.clone());
+        // On ne met en cache que les réponses OK de même origine (jamais une 404/500).
+        if (sameOrigin && res.ok) {
+          const cache = await caches.open(CACHE);
+          cache.put(req, res.clone());
+        }
         return res;
       } catch {
         const cached = await caches.match(req);

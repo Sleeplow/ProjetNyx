@@ -4,11 +4,32 @@ const STORAGE_KEY = 'nyxt.server';
 const DEFAULT_SERVER = 'wss://gamenyxt.sleeplow.ca';
 
 /**
+ * N'accepte qu'une URL de serveur WebSocket (`ws://` ou `wss://`) bien formée.
+ *
+ * SÉCURITÉ : sans ce garde-fou, un lien piégé du type
+ * `https://nyxt.sleeplow.ca/?server=wss://attaquant.example` détournerait
+ * DURABLEMENT le client de la victime (le pseudo et tout le trafic de jeu
+ * partiraient vers un serveur hostile), car la valeur est mémorisée dans le
+ * localStorage et survit à la fermeture de l'onglet. On rejette donc tout ce
+ * qui n'est pas une URL WebSocket valide (y compris `javascript:`, `http:`…).
+ */
+export function isValidServerUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'ws:' || u.protocol === 'wss:';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * URL du serveur temps-réel, configurable À L'EXÉCUTION (sans re-déployer) :
  *
  *  1. `?server=wss://…` dans l'URL → mémorisé (pratique pour un tunnel dont
  *     l'adresse change, et facile à partager à un ami). `?server=reset` efface.
- *  2. sinon, la dernière valeur mémorisée (localStorage).
+ *     Toute valeur qui n'est pas une URL `ws://`/`wss://` valide est IGNORÉE.
+ *  2. sinon, la dernière valeur mémorisée (localStorage), elle aussi validée
+ *     (une valeur invalide déjà stockée est purgée).
  *  3. sinon, la valeur figée au build (`VITE_NYXT_SERVER`).
  *  4. sinon, en build déployé → l'adresse fixe `game.sleeplow.ca` ;
  *     en dev (localhost) → le serveur local.
@@ -19,7 +40,8 @@ export function serverUrl(): string {
     if (q) {
       try {
         if (q === 'reset') localStorage.removeItem(STORAGE_KEY);
-        else localStorage.setItem(STORAGE_KEY, q);
+        else if (isValidServerUrl(q)) localStorage.setItem(STORAGE_KEY, q);
+        // sinon : schéma non autorisé → valeur ignorée (ne pas mémoriser).
       } catch {
         /* localStorage indisponible */
       }
@@ -28,7 +50,9 @@ export function serverUrl(): string {
 
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return saved;
+    if (saved && isValidServerUrl(saved)) return saved;
+    // Purge une valeur invalide/piégée héritée d'une version antérieure.
+    if (saved) localStorage.removeItem(STORAGE_KEY);
   } catch {
     /* localStorage indisponible */
   }

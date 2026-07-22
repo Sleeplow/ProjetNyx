@@ -46,3 +46,12 @@ export function selectServer(id: string): GameServer {
   }
   return s;
 }
+
+/** Oublie la sélection → on repasse au serveur par défaut. */
+export function resetServer(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* localStorage indisponible */
+  }
+}

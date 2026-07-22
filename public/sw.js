@@ -1,9 +1,34 @@
 /*
- * Service worker minimal pour Projet Nyxt (PWA installable + hors-ligne).
- * Stratégie : réseau d'abord, repli sur le cache (les assets sont hashés, donc
- * on met en cache au fil des requêtes — pas besoin de connaître leurs noms).
+ * Service worker Projet Nyxt (PWA installable + hors-ligne).
+ *
+ * Stratégie : RÉSEAU D'ABORD. En ligne, on sert toujours la version fraîche (et
+ * on la met en cache) ; hors-ligne, on retombe sur le cache.
+ *
+ * IMPORTANT — nom de cache VERSIONNÉ ET propre à la portée :
+ *   - Versionné : incrémenter `VERSION` (v2 → v3…) purge l'ancien cache à
+ *     l'activation. C'est LE correctif quand une app installée reste bloquée sur
+ *     d'anciens fichiers (écran figé / vide après un déploiement) : le stockage
+ *     du mode « standalone » iOS est séparé de Safari et n'est PAS vidé en
+ *     supprimant l'icône — seul un changement de version (ou l'effacement des
+ *     données de site) le purge.
+ *   - Propre à la portée : prod (racine `/`) et QA (`/qa/`) partagent la même
+ *     origine ; sans distinction, l'un purgerait le cache de l'autre. On suffixe
+ *     donc le nom par la portée pour les isoler.
  */
-const CACHE = 'nyxt-cache-v1';
+const VERSION = 'v2';
+
+// Portée du service worker : "/" en prod, "/qa/" en QA.
+let SCOPE = '/';
+try {
+  SCOPE = new URL(self.registration.scope).pathname;
+} catch {
+  /* self.registration indisponible : on garde "/" */
+}
+
+const CACHE = `nyxt::${SCOPE}::${VERSION}`;
+const SAME_SCOPE_PREFIX = `nyxt::${SCOPE}::`;
+/** Ancien nom de cache (partagé prod/QA, non versionné) — à purger partout. */
+const LEGACY_CACHE = 'nyxt-cache-v1';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -13,7 +38,13 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys();
-      await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+      await Promise.all(
+        keys
+          // Purge : l'ancien cache partagé + les versions périmées de CETTE portée
+          // (jamais le cache courant de l'autre portée).
+          .filter((k) => k === LEGACY_CACHE || (k.startsWith(SAME_SCOPE_PREFIX) && k !== CACHE))
+          .map((k) => caches.delete(k)),
+      );
       await self.clients.claim();
     })(),
   );

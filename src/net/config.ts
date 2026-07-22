@@ -1,66 +1,57 @@
-const STORAGE_KEY = 'nyxt.server';
+import { SERVERS, DEFAULT_SERVER_ID, serverById, type GameServer } from './servers';
 
-/** Adresse fixe du serveur de jeu (sous-domaine du domaine, HTTPS/WSS auto via Caddy). */
-const DEFAULT_SERVER = 'wss://gamenyxt.sleeplow.ca';
+/** Clé du serveur choisi (on ne mémorise que l'`id`, jamais une URL brute). */
+const STORAGE_KEY = 'nyxt.serverId';
+/** Ancienne clé (URL brute) purgée au chargement — voir `currentServer()`. */
+const LEGACY_URL_KEY = 'nyxt.server';
 
-/**
- * N'accepte qu'une URL de serveur WebSocket (`ws://` ou `wss://`) bien formée.
- *
- * SÉCURITÉ : sans ce garde-fou, un lien piégé du type
- * `https://nyxt.sleeplow.ca/?server=wss://attaquant.example` détournerait
- * DURABLEMENT le client de la victime (le pseudo et tout le trafic de jeu
- * partiraient vers un serveur hostile), car la valeur est mémorisée dans le
- * localStorage et survit à la fermeture de l'onglet. On rejette donc tout ce
- * qui n'est pas une URL WebSocket valide (y compris `javascript:`, `http:`…).
- */
-export function isValidServerUrl(value: string): boolean {
-  try {
-    const u = new URL(value);
-    return u.protocol === 'ws:' || u.protocol === 'wss:';
-  } catch {
-    return false;
-  }
+/** Serveur par défaut : local en dev, officiel une fois déployé (QA / prod). */
+function defaultServer(): GameServer {
+  if (import.meta.env.DEV) return serverById('local') ?? SERVERS[0];
+  return serverById(DEFAULT_SERVER_ID) ?? SERVERS[0];
 }
 
 /**
- * URL du serveur temps-réel, configurable À L'EXÉCUTION (sans re-déployer) :
+ * Serveur actuellement sélectionné : l'`id` mémorisé s'il désigne un serveur
+ * connu, sinon le défaut.
  *
- *  1. `?server=wss://…` dans l'URL → mémorisé (pratique pour un tunnel dont
- *     l'adresse change, et facile à partager à un ami). `?server=reset` efface.
- *     Toute valeur qui n'est pas une URL `ws://`/`wss://` valide est IGNORÉE.
- *  2. sinon, la dernière valeur mémorisée (localStorage), elle aussi validée
- *     (une valeur invalide déjà stockée est purgée).
- *  3. sinon, la valeur figée au build (`VITE_NYXT_SERVER`).
- *  4. sinon, en build déployé → l'adresse fixe `game.sleeplow.ca` ;
- *     en dev (localhost) → le serveur local.
+ * Comme on ne stocke qu'un `id` issu de la liste `SERVERS`, une valeur inconnue
+ * (serveur retiré, stockage corrompu) retombe automatiquement sur le défaut :
+ * fini le tunnel mort collé dans le navigateur. On en profite pour effacer
+ * l'ANCIENNE clé d'URL brute (`nyxt.server`), source de ce bug.
  */
-export function serverUrl(): string {
-  if (typeof location !== 'undefined') {
-    const q = new URLSearchParams(location.search).get('server');
-    if (q) {
-      try {
-        if (q === 'reset') localStorage.removeItem(STORAGE_KEY);
-        else if (isValidServerUrl(q)) localStorage.setItem(STORAGE_KEY, q);
-        // sinon : schéma non autorisé → valeur ignorée (ne pas mémoriser).
-      } catch {
-        /* localStorage indisponible */
-      }
-    }
-  }
-
+export function currentServer(): GameServer {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && isValidServerUrl(saved)) return saved;
-    // Purge une valeur invalide/piégée héritée d'une version antérieure.
-    if (saved) localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LEGACY_URL_KEY); // migration : purge l'ancienne URL brute
+    const found = serverById(localStorage.getItem(STORAGE_KEY));
+    if (found) return found;
   } catch {
     /* localStorage indisponible */
   }
+  return defaultServer();
+}
 
-  const configured = import.meta.env.VITE_NYXT_SERVER as string | undefined;
-  if (configured) return configured;
+/** URL WebSocket du serveur sélectionné (utilisée par le client réseau). */
+export function serverUrl(): string {
+  return currentServer().url;
+}
 
-  // En dev (localhost) on vise le serveur local ; une fois déployé (QA/prod),
-  // on vise l'adresse fixe du serveur de jeu.
-  return import.meta.env.DEV ? 'ws://localhost:2567' : DEFAULT_SERVER;
+/** Mémorise le serveur choisi (par `id` — jamais une URL arbitraire). */
+export function selectServer(id: string): GameServer {
+  const s = serverById(id) ?? defaultServer();
+  try {
+    localStorage.setItem(STORAGE_KEY, s.id);
+  } catch {
+    /* localStorage indisponible */
+  }
+  return s;
+}
+
+/** Oublie la sélection → on repasse au serveur par défaut. */
+export function resetServer(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* localStorage indisponible */
+  }
 }

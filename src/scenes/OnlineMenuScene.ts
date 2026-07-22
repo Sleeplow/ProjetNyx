@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import { makeButton, nightBackground } from '../ui/widgets';
 import { computeFrame, watchResize } from '../ui/layout';
 import { NetClient, type JoinOptions } from '../net/NetClient';
-import { serverUrl, isValidServerUrl } from '../net/config';
+import { currentServer, selectServer, resetServer } from '../net/config';
+import { allServers, addCustomServer, removeCustomServer, isCustom } from '../net/servers';
 import { ZAREKS } from '../zareks/registry';
 import type { Room } from 'colyseus.js';
 
@@ -20,6 +21,7 @@ export class OnlineMenuScene extends Phaser.Scene {
   private codeInput!: HTMLInputElement;
   private status!: Phaser.GameObjects.Text;
   private serverText!: Phaser.GameObjects.Text;
+  private removeBtn!: Phaser.GameObjects.Text;
   private busy = false;
   private zarekId = ZAREKS[0].id;
   private modeId = 'brawl-ball';
@@ -78,13 +80,28 @@ export class OnlineMenuScene extends Phaser.Scene {
     const st = F.at(0, 472);
     this.status = this.add.text(st.x, st.y, '', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(16), color: '#ffcf33' }).setOrigin(0.5);
 
-    // Serveur ciblé (modifiable d'un tap) — pratique pour brancher un tunnel.
-    const srv = F.at(0, 560);
+    // Serveur ciblé : un tap fait défiler la liste des serveurs disponibles.
+    const srv = F.at(0, 546);
     this.serverText = this.add
       .text(srv.x, srv.y, '', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(13), color: '#6c6c99', align: 'center', wordWrap: { width: F.px(920) } })
       .setOrigin(0.5, 1)
       .setInteractive({ useHandCursor: true })
-      .on('pointerup', () => this.changeServer());
+      .on('pointerup', () => this.cycleServer());
+
+    // Ligne d'actions : ajouter un serveur perso, ou retirer celui sélectionné.
+    const addP = F.at(-70, 576);
+    this.add
+      .text(addP.x, addP.y, '＋ Ajouter', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(13), color: '#8fa0ff' })
+      .setOrigin(0.5, 1)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerup', () => this.addCustom());
+    const rmP = F.at(70, 576);
+    this.removeBtn = this.add
+      .text(rmP.x, rmP.y, '✕ Retirer', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(13), color: '#ff8f8f' })
+      .setOrigin(0.5, 1)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerup', () => this.removeCustom());
+
     this.refreshServerText();
 
     this.layoutInputs();
@@ -136,28 +153,50 @@ export class OnlineMenuScene extends Phaser.Scene {
   }
 
   private refreshServerText(): void {
-    this.serverText.setText(`Serveur : ${serverUrl()}  (toucher pour changer)`);
+    const cur = currentServer();
+    const list = allServers();
+    const suffix = list.length > 1 ? '  (toucher pour changer)' : '';
+    this.serverText.setText(`Serveur : ${cur.label}${suffix}`);
+    // « Retirer » n'a de sens que pour un serveur perso actuellement choisi.
+    this.removeBtn.setVisible(isCustom(cur.id));
   }
 
-  /** Change l'URL du serveur (mémorisée) — utile pour brancher un tunnel wss://. */
-  private changeServer(): void {
-    const next = window.prompt('Adresse du serveur (ex. wss://mon-tunnel.trycloudflare.com)', serverUrl());
-    if (next === null) return;
-    const v = next.trim();
-    // On refuse toute adresse qui n'est pas une URL WebSocket (ws:// / wss://).
-    if (v && !isValidServerUrl(v)) {
+  /** Sélectionne le serveur suivant de la liste (figés + perso, circulaire). */
+  private cycleServer(): void {
+    const list = allServers();
+    if (list.length < 2) return; // rien à changer s'il n'y a qu'un serveur
+    const idx = list.findIndex((s) => s.id === currentServer().id);
+    const next = list[(idx + 1) % list.length];
+    selectServer(next.id);
+    this.net = new NetClient();
+    this.refreshServerText();
+    this.setStatus(`Serveur : ${next.label}`, '#46d160');
+  }
+
+  /** Ajoute un serveur perso (mémorisé en local) et le sélectionne. */
+  private addCustom(): void {
+    const url = window.prompt('Adresse du serveur à ajouter (ws:// ou wss://) :', 'wss://');
+    if (url === null) return; // annulé
+    const added = addCustomServer(url);
+    if (!added) {
       this.setStatus('Adresse invalide — utilise ws:// ou wss://.', '#ff6b5e');
       return;
     }
-    try {
-      if (v) localStorage.setItem('nyxt.server', v);
-      else localStorage.removeItem('nyxt.server');
-    } catch {
-      /* localStorage indisponible */
-    }
+    selectServer(added.id);
     this.net = new NetClient();
     this.refreshServerText();
-    this.setStatus('Serveur mis à jour.', '#46d160');
+    this.setStatus(`Serveur ajouté : ${added.label}`, '#46d160');
+  }
+
+  /** Retire le serveur perso sélectionné et repasse au serveur par défaut. */
+  private removeCustom(): void {
+    const cur = currentServer();
+    if (!isCustom(cur.id)) return;
+    removeCustomServer(cur.id);
+    resetServer();
+    this.net = new NetClient();
+    this.refreshServerText();
+    this.setStatus(`Serveur retiré : ${cur.label}`, '#ffcf33');
   }
 
   private makeInput(placeholder: string, maxLen: number, value: string): HTMLInputElement {

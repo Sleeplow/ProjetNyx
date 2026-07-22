@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { makeButton, nightBackground } from '../ui/widgets';
 import { computeFrame, watchResize } from '../ui/layout';
 import { NetClient, type JoinOptions } from '../net/NetClient';
-import { serverUrl } from '../net/config';
+import { serverUrl, isValidServerUrl } from '../net/config';
 import { ZAREKS } from '../zareks/registry';
 import type { Room } from 'colyseus.js';
 
@@ -103,7 +103,10 @@ export class OnlineMenuScene extends Phaser.Scene {
   }
 
   private playerName(): string {
-    const n = this.nameInput.value.trim().slice(0, 16) || 'Joueur';
+    // On retire les caractères de contrôle (sauts de ligne, tabulations…) : un
+    // pseudo « propre » évite de polluer l'affichage et les logs côté serveur.
+    const clean = this.nameInput.value.replace(/[\u0000-\u001f\u007f]/g, '').trim();
+    const n = clean.slice(0, 16) || 'Joueur';
     localStorage.setItem('nyxt.pseudo', n);
     return n;
   }
@@ -141,6 +144,11 @@ export class OnlineMenuScene extends Phaser.Scene {
     const next = window.prompt('Adresse du serveur (ex. wss://mon-tunnel.trycloudflare.com)', serverUrl());
     if (next === null) return;
     const v = next.trim();
+    // On refuse toute adresse qui n'est pas une URL WebSocket (ws:// / wss://).
+    if (v && !isValidServerUrl(v)) {
+      this.setStatus('Adresse invalide — utilise ws:// ou wss://.', '#ff6b5e');
+      return;
+    }
     try {
       if (v) localStorage.setItem('nyxt.server', v);
       else localStorage.removeItem('nyxt.server');

@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import { makeButton, nightBackground } from '../ui/widgets';
 import { computeFrame, watchResize } from '../ui/layout';
 import { NetClient, type JoinOptions } from '../net/NetClient';
-import { serverUrl, isValidServerUrl } from '../net/config';
+import { currentServer, selectServer } from '../net/config';
+import { SERVERS } from '../net/servers';
 import { ZAREKS } from '../zareks/registry';
 import type { Room } from 'colyseus.js';
 
@@ -78,13 +79,13 @@ export class OnlineMenuScene extends Phaser.Scene {
     const st = F.at(0, 472);
     this.status = this.add.text(st.x, st.y, '', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(16), color: '#ffcf33' }).setOrigin(0.5);
 
-    // Serveur ciblé (modifiable d'un tap) — pratique pour brancher un tunnel.
+    // Serveur ciblé : un tap fait défiler la liste des serveurs disponibles.
     const srv = F.at(0, 560);
     this.serverText = this.add
       .text(srv.x, srv.y, '', { fontFamily: 'system-ui, sans-serif', fontSize: F.font(13), color: '#6c6c99', align: 'center', wordWrap: { width: F.px(920) } })
       .setOrigin(0.5, 1)
       .setInteractive({ useHandCursor: true })
-      .on('pointerup', () => this.changeServer());
+      .on('pointerup', () => this.cycleServer());
     this.refreshServerText();
 
     this.layoutInputs();
@@ -136,28 +137,21 @@ export class OnlineMenuScene extends Phaser.Scene {
   }
 
   private refreshServerText(): void {
-    this.serverText.setText(`Serveur : ${serverUrl()}  (toucher pour changer)`);
+    const s = currentServer();
+    const suffix = SERVERS.length > 1 ? '  (toucher pour changer)' : '';
+    this.serverText.setText(`Serveur : ${s.label}${suffix}`);
   }
 
-  /** Change l'URL du serveur (mémorisée) — utile pour brancher un tunnel wss://. */
-  private changeServer(): void {
-    const next = window.prompt('Adresse du serveur (ex. wss://mon-tunnel.trycloudflare.com)', serverUrl());
-    if (next === null) return;
-    const v = next.trim();
-    // On refuse toute adresse qui n'est pas une URL WebSocket (ws:// / wss://).
-    if (v && !isValidServerUrl(v)) {
-      this.setStatus('Adresse invalide — utilise ws:// ou wss://.', '#ff6b5e');
-      return;
-    }
-    try {
-      if (v) localStorage.setItem('nyxt.server', v);
-      else localStorage.removeItem('nyxt.server');
-    } catch {
-      /* localStorage indisponible */
-    }
+  /** Sélectionne le serveur suivant dans la liste (défilement circulaire). */
+  private cycleServer(): void {
+    if (SERVERS.length < 2) return; // rien à changer s'il n'y a qu'un serveur
+    const cur = currentServer();
+    const idx = SERVERS.findIndex((s) => s.id === cur.id);
+    const next = SERVERS[(idx + 1) % SERVERS.length];
+    selectServer(next.id);
     this.net = new NetClient();
     this.refreshServerText();
-    this.setStatus('Serveur mis à jour.', '#46d160');
+    this.setStatus(`Serveur : ${next.label}`, '#46d160');
   }
 
   private makeInput(placeholder: string, maxLen: number, value: string): HTMLInputElement {

@@ -5,7 +5,7 @@ et pistes de features pour rapprocher le jeu de l'esprit **Brawl Stars** (« ver
 Dylan »). Ce fichier suit ce qui est **fait**, ce qui **reste à faire**, et les
 notes associées.
 
-> Dernière mise à jour : 2026-07-22
+> Dernière mise à jour : 2026-07-23
 
 **Légende de statut**
 - ✅ **Fait** — livré (voir le journal en bas)
@@ -130,6 +130,43 @@ Rend le jeu en ligne « avec un ami » vraiment fun sans être l'un contre l'aut
 
 ---
 
+## 2 bis. Robustesse réseau
+
+### 🔁 Vérification de version client ↔ serveur (handshake au join) — ⏳ 🖥️
+**Empêche un client périmé de jouer avec un serveur incompatible.** Un onglet
+resté ouvert, un cache tenace ou un déploiement décalé peut faire tourner une
+**vieille version** de la page qui parle un protocole différent du serveur
+(format des snapshots/inputs, noms de messages, règles) → bugs silencieux.
+
+**Point clé de conception :** comparer une **version de _protocole_**, PAS le
+build exact. Sinon chaque déploiement forcerait tous les joueurs à recharger même
+sans changement de contrat. On ne bump que quand le format client↔serveur change.
+
+**Mécanique :**
+1. `src/shared/version.ts` → `export const PROTOCOL_VERSION = 1`, importée par le
+   **client ET le serveur** (même source → toujours d'accord à build égal).
+2. **Client** (`NetClient`) : envoie `v: PROTOCOL_VERSION` dans les options de join.
+3. **Serveur** (`GameRoom.onAuth`) : compare `options.v` à son `PROTOCOL_VERSION`.
+   Différent (ou absent = vieux client) → rejette avec `ServerError(4001, 'VERSION_MISMATCH')`.
+4. **Client** : sur ce rejet → message « Nouvelle version — rechargement… » +
+   `location.reload()` (le SW réseau-d'abord récupère la version fraîche). Garde-fou
+   anti-boucle : un seul reload automatique par session (drapeau `sessionStorage`).
+
+**Quand bumper `PROTOCOL_VERSION` :** dès qu'on touche `snapshot.ts` (format
+snapshot), `InputState` (`types.ts`), les noms de messages, ou une règle de match
+que les deux côtés doivent partager.
+
+**Découpage :**
+- 🌐 **Moitié client** (page web, déployable seule) : constante partagée + envoi
+  du `v` + gestion du rejet/reload. Inoffensive tant que le serveur ne vérifie
+  pas (le champ `v` est simplement ignoré).
+- 🖥️ **Moitié serveur** (nécessite SSH/redeploy) : le contrôle + le rejet dans
+  `onAuth`. C'est elle qui fait « le serveur refuse ».
+- **Recommandation :** livrer les deux **ensemble** (sur le MacBook), sinon
+  l'enforcement reste inactif.
+
+---
+
 ## 3. Journal des changements réalisés
 
 Tous côté **page web** (déployés via le flux gh-pages `qa` → `/qa/`, sans toucher
@@ -154,6 +191,21 @@ silencieusement le serveur par défaut → échec de connexion en ligne.
 - `src/scenes/OnlineMenuScene.ts` : tap = défile la liste ; boutons **＋ Ajouter**
   / **✕ Retirer** ; `?server=` supprimé.
 
+### PR #16 — `FABLE.md` *(fusionnée dans `qa`)*
+Ce fichier de suivi (audit, feuille de route, journal).
+
+### PR #17 — Correctif PWA : cache de service worker versionné *(fusionnée dans `qa`)*
+L'app installée sur l'écran d'accueil iPhone restait bloquée sur un écran vide
+alors que Safari fonctionnait : le stockage « standalone » est séparé de Safari et
+n'est **pas** vidé en supprimant l'icône ; l'ancien service worker gardait en
+cache toutes les réponses sous un nom **jamais versionné** → cache empoisonné
+jamais purgé.
+- `public/sw.js` : nom de cache **versionné** (`v2` → purge auto de l'ancien à
+  l'activation) et **propre à la portée** (`/` prod vs `/qa/` QA, pour qu'ils ne
+  se purgent plus mutuellement).
+- Récupération d'une app déjà cassée : vider Réglages → Safari → Avancé →
+  Données de site web ; ensuite la purge devient automatique au lancement en ligne.
+
 ---
 
 ## 4. À faire ensuite (résumé)
@@ -166,6 +218,7 @@ silencieusement le serveur par défaut → échec de connexion en ligne.
 | Sécu | Rooms privées (`setPrivate`) | ⏳ 🖥️ | « Créer un salon » réellement privé |
 | Sécu | Sanitize pseudo côté serveur | ⏳ 🖥️ | client déjà filtré |
 | Sécu | `tsx` → `devDependencies`, durcissement systemd | ⏳ | hygiène |
+| Réseau | Handshake de version client ↔ serveur | ⏳ 🖥️ | client déployable seul ; enforcement = serveur |
 | Feat 1 | Sons & musique | ⏳ | prochain — gros impact, petit effort |
 | Feat 2 | Trophées & déblocage Zareks | ⏳ | boucle de rétention |
 | Feat 3 | Gem Grab | ⏳ | mode emblématique |

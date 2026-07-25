@@ -13205,7 +13205,7 @@ var require_websocket = __commonJS({
     "use strict";
     var EventEmitter5 = require("events");
     var https = require("https");
-    var http2 = require("http");
+    var http3 = require("http");
     var net = require("net");
     var tls = require("tls");
     var { randomBytes, createHash } = require("crypto");
@@ -13747,7 +13747,7 @@ var require_websocket = __commonJS({
       }
       const defaultPort = isSecure ? 443 : 80;
       const key = randomBytes(16).toString("base64");
-      const request = isSecure ? https.request : http2.request;
+      const request = isSecure ? https.request : http3.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
       opts.createConnection = opts.createConnection || (isSecure ? tlsConnect : netConnect);
@@ -14243,7 +14243,7 @@ var require_websocket_server = __commonJS({
   "node_modules/ws/lib/websocket-server.js"(exports2, module2) {
     "use strict";
     var EventEmitter5 = require("events");
-    var http2 = require("http");
+    var http3 = require("http");
     var { Duplex } = require("stream");
     var { createHash } = require("crypto");
     var extension2 = require_extension();
@@ -14324,8 +14324,8 @@ var require_websocket_server = __commonJS({
           );
         }
         if (options.port != null) {
-          this._server = http2.createServer((req, res) => {
-            const body = http2.STATUS_CODES[426];
+          this._server = http3.createServer((req, res) => {
+            const body = http3.STATUS_CODES[426];
             res.writeHead(426, {
               "Content-Length": body.length,
               "Content-Type": "text/plain"
@@ -14614,7 +14614,7 @@ var require_websocket_server = __commonJS({
       this.destroy();
     }
     function abortHandshake(socket, code, message, headers) {
-      message = message || http2.STATUS_CODES[code];
+      message = message || http3.STATUS_CODES[code];
       headers = {
         Connection: "close",
         "Content-Type": "text/html",
@@ -14623,7 +14623,7 @@ var require_websocket_server = __commonJS({
       };
       socket.once("finish", socket.destroy);
       socket.end(
-        `HTTP/1.1 ${code} ${http2.STATUS_CODES[code]}\r
+        `HTTP/1.1 ${code} ${http3.STATUS_CODES[code]}\r
 ` + Object.keys(headers).map((h) => `${h}: ${headers[h]}`).join("\r\n") + "\r\n\r\n" + message
       );
     }
@@ -14638,6 +14638,9 @@ var require_websocket_server = __commonJS({
     }
   }
 });
+
+// server/index.ts
+var import_http2 = __toESM(require("http"), 1);
 
 // node_modules/@colyseus/timer/build/index.mjs
 var Delayed = class {
@@ -25223,13 +25226,42 @@ function norm(x, y) {
   const d = Math.hypot(x, y);
   return d < 1e-4 ? { x: 0, y: 0 } : { x: x / d, y: y / d };
 }
+var PERSONALITIES = [
+  { name: "brawler", preferredRange: 0.45, strafe: 0.3, jitter: 0.15, fleeHp: 0.18, cubeGreed: 0.5 },
+  { name: "sniper", preferredRange: 0.9, strafe: 0.6, jitter: 0.2, fleeHp: 0.35, cubeGreed: 0.4 },
+  { name: "trickster", preferredRange: 0.65, strafe: 0.95, jitter: 0.35, fleeHp: 0.28, cubeGreed: 0.5 },
+  { name: "farmer", preferredRange: 0.75, strafe: 0.4, jitter: 0.25, fleeHp: 0.4, cubeGreed: 0.95 },
+  { name: "coward", preferredRange: 0.95, strafe: 0.7, jitter: 0.3, fleeHp: 0.5, cubeGreed: 0.6 }
+];
 var BattleBot = class {
-  constructor() {
+  constructor(variant = Math.floor(Math.random() * PERSONALITIES.length)) {
+    // +1 ou −1 : tourne dans un sens ou l'autre
     // Point d'errance mémorisé (rafraîchi périodiquement, pas chaque frame).
     this.wx = 0;
     this.wy = 0;
     this.wanderMs = 0;
     this.seeded = false;
+    // Bruit de déplacement mémorisé (rafraîchi périodiquement pour rester organique).
+    this.jx = 0;
+    this.jy = 0;
+    this.jitterMs = 0;
+    this.p = PERSONALITIES[(variant % PERSONALITIES.length + PERSONALITIES.length) % PERSONALITIES.length];
+    this.personality = this.p.name;
+    this.strafeSign = Math.random() < 0.5 ? 1 : -1;
+  }
+  /** Cube vivant le plus proche + sa distance (Infinity si aucun). */
+  nearestCube(self, world) {
+    let cube = null;
+    let cd = Infinity;
+    for (const q of world.cubes) {
+      if (!q.alive) continue;
+      const d = Math.hypot(q.x - self.x, q.y - self.y);
+      if (d < cd) {
+        cd = d;
+        cube = q;
+      }
+    }
+    return { cube, d: cd };
   }
   update(self, world, dtMs) {
     const inp = emptyInput();
@@ -25246,7 +25278,14 @@ var BattleBot = class {
       }
     }
     const range = self.def.attack.range;
-    const lowHp = self.healthRatio < 0.3;
+    const lowHp = self.healthRatio < this.p.fleeHp;
+    this.jitterMs -= dtMs;
+    if (this.jitterMs <= 0) {
+      const a = Math.random() * Math.PI * 2;
+      this.jx = Math.cos(a);
+      this.jy = Math.sin(a);
+      this.jitterMs = 500;
+    }
     let outside = false;
     let retreat = null;
     if (world.danger) {
@@ -25285,25 +25324,40 @@ var BattleBot = class {
       move(retreat.x - self.x, retreat.y - self.y);
       if (foe && fd < range) shootAt(foe);
     } else if (lowHp && foe) {
-      move(self.x - foe.x, self.y - foe.y);
+      const away = norm(self.x - foe.x, self.y - foe.y);
+      const perp = { x: -away.y * this.strafeSign, y: away.x * this.strafeSign };
+      move(away.x + perp.x * 0.4 + this.jx * this.p.jitter, away.y + perp.y * 0.4 + this.jy * this.p.jitter);
       if (fd < range) shootAt(foe);
     } else if (foe) {
-      if (fd > range * 0.85) move(foe.x - self.x, foe.y - self.y);
-      else if (fd < range * 0.4) move(self.x - foe.x, self.y - foe.y);
+      const want = range * this.p.preferredRange;
+      const margin = range * 0.12;
+      const toFoe = norm(foe.x - self.x, foe.y - self.y);
+      let radial = 0;
+      if (fd > want + margin) radial = 1;
+      else if (fd < want - margin) radial = -1;
+      const perp = { x: -toFoe.y * this.strafeSign, y: toFoe.x * this.strafeSign };
+      let mx = toFoe.x * radial + perp.x * this.p.strafe + this.jx * this.p.jitter;
+      let my = toFoe.y * radial + perp.y * this.p.strafe + this.jy * this.p.jitter;
+      const { cube, d: cd } = this.nearestCube(self, world);
+      const oppReach = 90 + this.p.cubeGreed * 260;
+      if (cube && cd < oppReach) {
+        const toCube = norm(cube.x - self.x, cube.y - self.y);
+        const pull = Math.max(0, 1 - cd / oppReach) * (0.7 + this.p.cubeGreed);
+        mx += toCube.x * pull;
+        my += toCube.y * pull;
+      }
+      move(mx, my);
       if (fd < range) shootAt(foe);
     } else {
-      let cube = null;
-      let cd = Infinity;
-      for (const q of world.cubes) {
-        if (!q.alive) continue;
-        const d = Math.hypot(q.x - self.x, q.y - self.y);
-        if (d < cd) {
-          cd = d;
-          cube = q;
-        }
+      const { cube, d: cd } = this.nearestCube(self, world);
+      const cubeReach = 120 + this.p.cubeGreed * 700;
+      if (cube && cd < cubeReach) {
+        move(cube.x - self.x + this.jx * this.p.jitter, cube.y - self.y + this.jy * this.p.jitter);
+      } else if (Math.hypot(this.wx - self.x, this.wy - self.y) > 80) {
+        move(this.wx - self.x + this.jx * this.p.jitter * 40, this.wy - self.y + this.jy * this.p.jitter * 40);
+      } else {
+        move(this.jx, this.jy);
       }
-      if (cube) move(cube.x - self.x, cube.y - self.y);
-      else if (Math.hypot(this.wx - self.x, this.wy - self.y) > 80) move(this.wx - self.x, this.wy - self.y);
     }
     return inp;
   }
@@ -25811,6 +25865,31 @@ var MatchSim = class {
   }
   setInput(id, input) {
     if (this.combatants.some((c) => c.id === id && !c.isBot)) this.inputs.set(id, input);
+  }
+  /**
+   * Reconnexion — suspend un joueur déconnecté : sa place est jouée par un bot,
+   * mais on GARDE son id (= sessionId) pour qu'il la reprenne en revenant. En
+   * dehors d'un match (lobby / fin), on garde la place telle quelle (pas de bot).
+   */
+  suspendPlayer(id) {
+    const c = this.combatants.find((k) => k.id === id && !k.isBot);
+    if (!c) return;
+    this.inputs.delete(id);
+    if (this.phase === "lobby" || this.phase === "ended") return;
+    c.isBot = true;
+    this.bots.set(id, this.isBR ? new BattleBot() : new SoccerBot(spawnsFor(c.team)[0].role));
+  }
+  /** Reconnexion — rend le contrôle humain d'une place suspendue. */
+  resumePlayer(id, name, zarekId) {
+    const c = this.combatants.find((k) => k.id === id);
+    if (!c) return;
+    this.bots.delete(id);
+    c.isBot = false;
+    if (name) c.name = name;
+    if (ZAREK_BY_ID[zarekId]) {
+      c.zarekId = zarekId;
+      c.def = getZarek(zarekId);
+    }
   }
   requestStart() {
     if (this.phase === "lobby" && this.humanCount() > 0) this.startMatch();
@@ -26522,6 +26601,7 @@ var activeRooms = 0;
 var MAX_MSGS_PER_SEC = 240;
 var ERR_VERSION_MISMATCH = 4001;
 var ERR_SERVER_FULL = 4002;
+var RECONNECT_SECONDS = 20;
 var RoomInfo = class extends Schema {
   constructor() {
     super(...arguments);
@@ -26535,6 +26615,8 @@ var GameRoom = class extends Room {
     this.maxClients = 6;
     /** Fenêtre glissante (1 s) du nombre de messages reçus par client. */
     this.msgWindow = /* @__PURE__ */ new Map();
+    /** Pseudo + Zarek par session (pour restaurer la place à la reconnexion). */
+    this.players = /* @__PURE__ */ new Map();
   }
   /** Vrai si le client n'a pas dépassé le plafond de messages sur la seconde en cours. */
   rateOk(client) {
@@ -26591,13 +26673,38 @@ var GameRoom = class extends Room {
     const name = (options?.name ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 16) || "Joueur";
     const zarek = typeof options?.zarek === "string" ? options.zarek : "zephyr";
     const team = options?.team === 1 ? 1 : 0;
+    this.players.set(client.sessionId, { name, zarek });
     this.sim.addPlayer(client.sessionId, name, zarek, team);
     console.log(`[${this.roomId}] join ${name} (${this.clients.length}/${this.maxClients})`);
   }
-  onLeave(client) {
-    this.sim.removePlayer(client.sessionId);
+  /**
+   * Départ d'un client. Deux cas :
+   *  - `consented` (bouton Quitter) → on finalise tout de suite (place → bot).
+   *  - déconnexion SUBIE (réseau mobile qui décroche) → on garde la place ~20 s,
+   *    jouée par un bot, le temps que le joueur revienne (`allowReconnection`).
+   */
+  async onLeave(client, consented) {
     this.msgWindow.delete(client.sessionId);
-    console.log(`[${this.roomId}] leave ${client.sessionId}`);
+    if (consented) {
+      this.finalizeLeave(client.sessionId);
+      return;
+    }
+    this.sim.suspendPlayer(client.sessionId);
+    console.log(`[${this.roomId}] d\xE9connexion ${client.sessionId} (attente reconnexion\u2026)`);
+    try {
+      await this.allowReconnection(client, RECONNECT_SECONDS);
+      const info = this.players.get(client.sessionId);
+      this.sim.resumePlayer(client.sessionId, info?.name ?? "Joueur", info?.zarek ?? "zephyr");
+      console.log(`[${this.roomId}] reconnexion ${client.sessionId}`);
+    } catch {
+      this.finalizeLeave(client.sessionId);
+    }
+  }
+  /** Départ définitif : la place devient un bot (ou disparaît hors match). */
+  finalizeLeave(id) {
+    this.players.delete(id);
+    this.sim.removePlayer(id);
+    console.log(`[${this.roomId}] leave ${id}`);
   }
   tick(dtMs) {
     try {
@@ -26642,6 +26749,9 @@ function isAllowedOrigin(origin) {
   return extra.includes(host);
 }
 var gameServer = new Server({
+  // Arrêt gracieux (défaut Colyseus) : sur SIGTERM/SIGINT (ex. redémarrage
+  // systemd), les salons sont fermés proprement avant de quitter.
+  gracefullyShutdown: true,
   transport: new WebSocketTransport({
     // Les messages de jeu sont minuscules (intentions) : 16 Ko borne largement
     // les envois abusifs sans risque de couper une communication légitime.
@@ -26650,7 +26760,18 @@ var gameServer = new Server({
     verifyClient: (info, next) => next(isAllowedOrigin(info.origin))
   })
 });
+gameServer.onShutdown(() => console.log("Arr\xEAt gracieux du serveur Nyxt\u2026"));
 gameServer.define("nyxt", GameRoom).filterBy(["mode"]);
+var healthPort = Number(process.env.HEALTH_PORT) || 2568;
+import_http2.default.createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, uptime: Math.round(process.uptime()), rss: process.memoryUsage().rss }));
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+}).listen(healthPort, "127.0.0.1", () => console.log(`\u{1FA7A} Sonde de sant\xE9 sur http://127.0.0.1:${healthPort}/health`));
 gameServer.listen(port).then(() => console.log(`\u26BD Serveur Nyxt en \xE9coute sur ws://localhost:${port}`)).catch((err) => {
   console.error("\xC9chec du d\xE9marrage du serveur :", err);
   process.exit(1);

@@ -34,6 +34,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run typecheck:server
+      - run: npm test
+      - run: npm run build:server
+      - name: Vérifie que le bundle serveur commité est à jour
+        run: git diff --exit-code server/nyxt-server.cjs || { echo "::error::Bundle serveur périmé — lance 'npm run build:server' puis recommite server/nyxt-server.cjs."; exit 1; }
+      - name: Smoke test serveur (boot + connexion client)
+        run: npm run test:smoke
       - run: npm run build
       - name: Upload build
         uses: actions/upload-artifact@v4

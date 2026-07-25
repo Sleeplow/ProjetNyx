@@ -22,6 +22,9 @@ const MAX_MSGS_PER_SEC = 240;
 const ERR_VERSION_MISMATCH = 4001;
 const ERR_SERVER_FULL = 4002;
 
+/** Fenêtre de reconnexion (s) après une déconnexion subie (réseau mobile qui décroche). */
+const RECONNECT_SECONDS = 20;
+
 /** État minimal du salon (schéma plat) — le match est diffusé en snapshots. */
 class RoomInfo extends Schema {
   mode = 'brawl-ball';
@@ -49,6 +52,8 @@ export class GameRoom extends Room<RoomInfo> {
   private sim!: MatchSim;
   /** Fenêtre glissante (1 s) du nombre de messages reçus par client. */
   private readonly msgWindow = new Map<string, { start: number; count: number }>();
+  /** Pseudo + Zarek par session (pour restaurer la place à la reconnexion). */
+  private readonly players = new Map<string, { name: string; zarek: string }>();
 
   /** Vrai si le client n'a pas dépassé le plafond de messages sur la seconde en cours. */
   private rateOk(client: Client): boolean {
@@ -119,14 +124,40 @@ export class GameRoom extends Room<RoomInfo> {
     const name = (options?.name ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 16) || 'Joueur';
     const zarek = typeof options?.zarek === 'string' ? options.zarek : 'zephyr';
     const team = options?.team === 1 ? 1 : 0;
+    this.players.set(client.sessionId, { name, zarek }); // pour restaurer à la reconnexion
     this.sim.addPlayer(client.sessionId, name, zarek, team);
     console.log(`[${this.roomId}] join ${name} (${this.clients.length}/${this.maxClients})`);
   }
 
-  onLeave(client: Client): void {
-    this.sim.removePlayer(client.sessionId);
+  /**
+   * Départ d'un client. Deux cas :
+   *  - `consented` (bouton Quitter) → on finalise tout de suite (place → bot).
+   *  - déconnexion SUBIE (réseau mobile qui décroche) → on garde la place ~20 s,
+   *    jouée par un bot, le temps que le joueur revienne (`allowReconnection`).
+   */
+  async onLeave(client: Client, consented?: boolean): Promise<void> {
     this.msgWindow.delete(client.sessionId);
-    console.log(`[${this.roomId}] leave ${client.sessionId}`);
+    if (consented) {
+      this.finalizeLeave(client.sessionId);
+      return;
+    }
+    this.sim.suspendPlayer(client.sessionId);
+    console.log(`[${this.roomId}] déconnexion ${client.sessionId} (attente reconnexion…)`);
+    try {
+      await this.allowReconnection(client, RECONNECT_SECONDS);
+      const info = this.players.get(client.sessionId);
+      this.sim.resumePlayer(client.sessionId, info?.name ?? 'Joueur', info?.zarek ?? 'zephyr');
+      console.log(`[${this.roomId}] reconnexion ${client.sessionId}`);
+    } catch {
+      this.finalizeLeave(client.sessionId); // délai dépassé → place définitivement un bot
+    }
+  }
+
+  /** Départ définitif : la place devient un bot (ou disparaît hors match). */
+  private finalizeLeave(id: string): void {
+    this.players.delete(id);
+    this.sim.removePlayer(id);
+    console.log(`[${this.roomId}] leave ${id}`);
   }
 
   private tick(dtMs: number): void {

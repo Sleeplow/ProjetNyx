@@ -56,17 +56,33 @@ domaine) pointe dessus. Plus d'URL au hasard.
    (`0.0.0.0/0`).
 4. **DNS** (WHC) : ajouter un enregistrement **A** `gamenyxt` → l'IP publique de la
    machine (même endroit que le `nyxt` vers GitHub Pages).
-5. **Installer le serveur** (en SSH sur la machine) :
+5. **Installer le serveur** (en SSH sur la machine, **une seule fois**) :
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/Sleeplow/ProjetNyx/qa/server/deploy/setup-oracle.sh -o setup.sh
+   curl -fsSL https://raw.githubusercontent.com/Sleeplow/ProjetNyx/main/server/deploy/setup-oracle.sh -o setup.sh
    sudo bash setup.sh
    ```
    Le script (`server/deploy/setup-oracle.sh`) installe Node + Caddy, ouvre le
    pare-feu interne, télécharge le bundle, crée un service qui redémarre tout
-   seul, et **obtient le certificat HTTPS automatiquement** pour le domaine.
+   seul, **obtient le certificat HTTPS automatiquement**, et installe la **mise à
+   jour automatique**.
 
 Ensuite le jeu se connecte à `wss://gamenyxt.sleeplow.ca` sans rien à configurer.
-Mettre le serveur à jour = relancer `sudo bash setup.sh`.
+
+### Mise à jour AUTOMATIQUE (sans SSH)
+
+`setup-oracle.sh` installe un minuteur systemd (`nyxt-update.timer`) qui, toutes
+les ~2 min, **télécharge** le bundle de la branche suivie (`main` par défaut) et
+le redéploie **s'il a changé** — avec **rollback automatique** si `/health` ne
+répond pas après redémarrage.
+
+- **Déclencheur** : une promotion `qa → main` → la VM se met à jour ~2 min après.
+- **Sûr sur repo public** : la VM ne fait que `curl` un fichier précis, elle
+  **n'exécute jamais de code de PR** (contrairement à un runner auto-hébergé,
+  déconseillé sur repo public).
+- Réglages : `BRANCH=…` (branche suivie), `AUTO_UPDATE_MINUTES=0` (désactive),
+  `journalctl -t nyxt-update -f` (logs), `systemctl list-timers nyxt-update.timer`.
+
+Mise à jour manuelle si besoin : relancer `sudo bash setup.sh`.
 
 ## Tunnel (dépannage / test rapide seulement)
 

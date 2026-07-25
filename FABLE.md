@@ -85,7 +85,8 @@ le code de salon devient le seul moyen d'entrer.
 - `tsx` en `dependencies` alors qu'il ne sert qu'en dev → ✅ **déplacé en
   `devDependencies`** (PR #21).
 - Bundle `server/nyxt-server.cjs` commité et téléchargé en prod depuis `qa` :
-  fonctionne, mais un build en CI serait plus traçable. ⏳ 🖥️
+  → ✅ **la CI le rebuild et vérifie qu'il est à jour** (garde-fou anti-« oubli de
+  rebuild ») + smoke test qui démarre le serveur et y connecte un client (PR #35).
 - Durcissement `systemd` dans `setup-oracle.sh` → ✅ **fait** (`NoNewPrivileges`,
   `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `MemoryMax=512M`…) (PR #21 ;
   appliqué au prochain `sudo bash setup.sh`).
@@ -176,6 +177,29 @@ que les deux côtés doivent partager.
 
 ---
 
+## 2 ter. Renforcement back-end — ✅ Fait (PR #32 → #35)
+
+Solidification de la partie invisible (simulation autoritaire + infra), sans
+toucher au fun (audio/gameplay gardés pour plus tard).
+
+- **🧪 Filet de tests + typecheck serveur en CI** (PR #32) : vitest (env Node) sur
+  la logique pure — géométrie, éclair en chaîne, et la **simulation de match
+  complète** (BR de bout en bout, Brawl Ball, lobby, revanche, suspend/reprise).
+  Le serveur, non typé-vérifié avant, l'est maintenant (`tsconfig.server.json`).
+- **🤖 IA — variété + anti-stalemate + ramassage opportuniste** (PR #33) : les bots
+  BR ont des **personnalités** (brawler/sniper/trickster/farmer/coward), tournent
+  autour de l'ennemi au lieu de rester figés en miroir, et **dévient pour ramasser
+  un cube** qu'ils frôlent en combat. Corrige les deux comportements observés.
+- **🔌 Reconnexion** (PR #34) : une déconnexion subie (réseau mobile) garde la
+  place ~20 s (`allowReconnection`) ; le client se reconnecte tout seul. Départ
+  volontaire = bot immédiat.
+- **🩺 Observabilité + smoke test** (PR #35) : sonde `/health` (port interne),
+  arrêt gracieux (défaut Colyseus, explicité), et **smoke test en CI** (démarre le
+  serveur, connecte un client, vérifie join/snapshot/handshake/health) + garde-fou
+  « bundle serveur à jour ».
+
+---
+
 ## 3. Journal des changements réalisés
 
 Sauf mention contraire, côté **page web** (flux gh-pages `qa` → `/qa/`). La PR #19
@@ -223,8 +247,8 @@ jamais purgé.
 - **Garde-fous** : plafond de salons (50), `maxPayload` 16 Ko, vérification d'`Origin`.
 - **Sanitize serveur** du pseudo (longueur + caractères de contrôle).
 
-### PR #20 — Promotion `qa` → `main` *(fusionnée)*
-Mise en production de tout le travail précédent (#14 → #19).
+### PR #20 / #30 — Promotions `qa` → `main` *(fusionnées)*
+Mises en production successives de tout le travail (#14 → #21, puis suivants).
 
 ### PR #21 — Nettoyage des dépendances + fin des garde-fous *(redéploiement VM requis)*
 - **Vite 5 → 7** (ferme l'avis esbuild dev-server) + CI **Node 22** + `tsx` en devDeps.
@@ -236,6 +260,11 @@ Mise en production de tout le travail précédent (#14 → #19).
 - Compat client 0.16.22 ↔ serveur (join, synchro d'état, snapshot, handshake)
   **validée localement**.
 
+### PR #32 → #35 — Renforcement back-end *(#33/#34/#35 : redéploiement VM requis)*
+Voir §2 ter. Tests + typecheck serveur en CI (#32) ; IA variée + anti-stalemate +
+ramassage opportuniste (#33) ; reconnexion des joueurs (#34) ; `/health` + arrêt
+gracieux + smoke test CI + garde-fou bundle (#35).
+
 ---
 
 ## 4. À faire ensuite (résumé)
@@ -244,11 +273,11 @@ Mise en production de tout le travail précédent (#14 → #19).
 |---|---|---|---|
 | Sécu | `nanoid` (Colyseus 0.16) | ⚪ Sans objet | non exploitable (ID taille fixe) ; bump 0.17 bloqué (pas de client compatible) |
 | Réseau | Durcir le handshake (refuser l'absence de `v`) | ⏳ 🖥️ | une fois les vieux clients prod expirés |
-| Infra | Build du bundle serveur en CI (traçabilité) | ⏳ | hygiène |
 | Feat 1 | Sons & musique | ⏳ | prochain — gros impact, petit effort |
 | Feat 2 | Trophées & déblocage Zareks | ⏳ | boucle de rétention |
 | Feat 3 | Gem Grab | ⏳ | mode emblématique |
 | Feat 4 | Duo Showdown | ⏳ | BR à deux |
 
-**Sécurité : plus rien de critique ni de moyen ne reste.** Les seuls items ouverts
-sont de l'hygiène/robustesse.
+**Sécurité ET renforcement back-end : bouclés.** Les seuls items ouverts sont un
+durcissement optionnel du handshake et les **features fun** (audio en tête) —
+à faire plus tard avec ton fils.

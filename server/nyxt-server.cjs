@@ -13205,7 +13205,7 @@ var require_websocket = __commonJS({
     "use strict";
     var EventEmitter5 = require("events");
     var https = require("https");
-    var http2 = require("http");
+    var http3 = require("http");
     var net = require("net");
     var tls = require("tls");
     var { randomBytes, createHash } = require("crypto");
@@ -13747,7 +13747,7 @@ var require_websocket = __commonJS({
       }
       const defaultPort = isSecure ? 443 : 80;
       const key = randomBytes(16).toString("base64");
-      const request = isSecure ? https.request : http2.request;
+      const request = isSecure ? https.request : http3.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
       opts.createConnection = opts.createConnection || (isSecure ? tlsConnect : netConnect);
@@ -14243,7 +14243,7 @@ var require_websocket_server = __commonJS({
   "node_modules/ws/lib/websocket-server.js"(exports2, module2) {
     "use strict";
     var EventEmitter5 = require("events");
-    var http2 = require("http");
+    var http3 = require("http");
     var { Duplex } = require("stream");
     var { createHash } = require("crypto");
     var extension2 = require_extension();
@@ -14324,8 +14324,8 @@ var require_websocket_server = __commonJS({
           );
         }
         if (options.port != null) {
-          this._server = http2.createServer((req, res) => {
-            const body = http2.STATUS_CODES[426];
+          this._server = http3.createServer((req, res) => {
+            const body = http3.STATUS_CODES[426];
             res.writeHead(426, {
               "Content-Length": body.length,
               "Content-Type": "text/plain"
@@ -14614,7 +14614,7 @@ var require_websocket_server = __commonJS({
       this.destroy();
     }
     function abortHandshake(socket, code, message, headers) {
-      message = message || http2.STATUS_CODES[code];
+      message = message || http3.STATUS_CODES[code];
       headers = {
         Connection: "close",
         "Content-Type": "text/html",
@@ -14623,7 +14623,7 @@ var require_websocket_server = __commonJS({
       };
       socket.once("finish", socket.destroy);
       socket.end(
-        `HTTP/1.1 ${code} ${http2.STATUS_CODES[code]}\r
+        `HTTP/1.1 ${code} ${http3.STATUS_CODES[code]}\r
 ` + Object.keys(headers).map((h) => `${h}: ${headers[h]}`).join("\r\n") + "\r\n\r\n" + message
       );
     }
@@ -14638,6 +14638,9 @@ var require_websocket_server = __commonJS({
     }
   }
 });
+
+// server/index.ts
+var import_http2 = __toESM(require("http"), 1);
 
 // node_modules/@colyseus/timer/build/index.mjs
 var Delayed = class {
@@ -26746,6 +26749,9 @@ function isAllowedOrigin(origin) {
   return extra.includes(host);
 }
 var gameServer = new Server({
+  // Arrêt gracieux (défaut Colyseus) : sur SIGTERM/SIGINT (ex. redémarrage
+  // systemd), les salons sont fermés proprement avant de quitter.
+  gracefullyShutdown: true,
   transport: new WebSocketTransport({
     // Les messages de jeu sont minuscules (intentions) : 16 Ko borne largement
     // les envois abusifs sans risque de couper une communication légitime.
@@ -26754,7 +26760,18 @@ var gameServer = new Server({
     verifyClient: (info, next) => next(isAllowedOrigin(info.origin))
   })
 });
+gameServer.onShutdown(() => console.log("Arr\xEAt gracieux du serveur Nyxt\u2026"));
 gameServer.define("nyxt", GameRoom).filterBy(["mode"]);
+var healthPort = Number(process.env.HEALTH_PORT) || 2568;
+import_http2.default.createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, uptime: Math.round(process.uptime()), rss: process.memoryUsage().rss }));
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+}).listen(healthPort, "127.0.0.1", () => console.log(`\u{1FA7A} Sonde de sant\xE9 sur http://127.0.0.1:${healthPort}/health`));
 gameServer.listen(port).then(() => console.log(`\u26BD Serveur Nyxt en \xE9coute sur ws://localhost:${port}`)).catch((err) => {
   console.error("\xC9chec du d\xE9marrage du serveur :", err);
   process.exit(1);

@@ -1,0 +1,10 @@
+{
+  "//": "Typecheck du serveur (non couvert par tsconfig.json qui ne vise que src/). Inclut server/** et suit ses imports (chaîne pure, sans Phaser/DOM).",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "lib": ["ES2020"],
+    "noEmit": true
+  },
+  "include": ["server"]
+}

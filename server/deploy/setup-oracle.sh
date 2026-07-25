@@ -69,6 +69,22 @@ iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null  || iptables -I INPUT 
 iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 443 -j ACCEPT
 netfilter-persistent save || true
 
+# 4b) Mises à jour de SÉCURITÉ automatiques de la MACHINE (OS / kernel / OpenSSL /
+#     OpenSSH…). Empêche de « prendre du retard » sur les correctifs sans SSH.
+#     Reboot auto la nuit (4 h) si un correctif kernel l'exige — le service de jeu
+#     redémarre au boot, et la reconnexion couvre le bref creux.
+apt-get install -y unattended-upgrades
+cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+cat > /etc/apt/apt.conf.d/52nyxt-unattended <<'EOF'
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "04:00";
+EOF
+systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
+echo "==> Mises à jour de sécurité OS automatiques activées (reboot auto à 4 h si requis)."
+
 # 5) Récupère le serveur (bundle autonome)
 mkdir -p "${APP_DIR}"
 echo "==> Téléchargement du serveur…"
@@ -204,8 +220,10 @@ echo "   • État jeu    : systemctl status nyxt-server"
 echo "   • Logs jeu    : journalctl -u nyxt-server -f"
 echo "   • État HTTPS  : systemctl status caddy"
 echo "   • Logs HTTPS  : journalctl -u caddy -f"
-echo "   • Màj auto    : systemctl list-timers nyxt-update.timer"
+echo "   • Màj jeu     : systemctl list-timers nyxt-update.timer"
 echo "   • Logs màj    : journalctl -t nyxt-update -f"
+echo "   • Màj OS      : apt list --upgradable  |  reboot requis ? test -f /var/run/reboot-required"
+echo "   • Logs màj OS : cat /var/log/unattended-upgrades/unattended-upgrades.log"
 echo
 echo " Le jeu doit se connecter à :  wss://${DOMAIN}"
 echo

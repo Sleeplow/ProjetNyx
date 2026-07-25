@@ -25223,13 +25223,42 @@ function norm(x, y) {
   const d = Math.hypot(x, y);
   return d < 1e-4 ? { x: 0, y: 0 } : { x: x / d, y: y / d };
 }
+var PERSONALITIES = [
+  { name: "brawler", preferredRange: 0.45, strafe: 0.3, jitter: 0.15, fleeHp: 0.18, cubeGreed: 0.5 },
+  { name: "sniper", preferredRange: 0.9, strafe: 0.6, jitter: 0.2, fleeHp: 0.35, cubeGreed: 0.4 },
+  { name: "trickster", preferredRange: 0.65, strafe: 0.95, jitter: 0.35, fleeHp: 0.28, cubeGreed: 0.5 },
+  { name: "farmer", preferredRange: 0.75, strafe: 0.4, jitter: 0.25, fleeHp: 0.4, cubeGreed: 0.95 },
+  { name: "coward", preferredRange: 0.95, strafe: 0.7, jitter: 0.3, fleeHp: 0.5, cubeGreed: 0.6 }
+];
 var BattleBot = class {
-  constructor() {
+  constructor(variant = Math.floor(Math.random() * PERSONALITIES.length)) {
+    // +1 ou −1 : tourne dans un sens ou l'autre
     // Point d'errance mémorisé (rafraîchi périodiquement, pas chaque frame).
     this.wx = 0;
     this.wy = 0;
     this.wanderMs = 0;
     this.seeded = false;
+    // Bruit de déplacement mémorisé (rafraîchi périodiquement pour rester organique).
+    this.jx = 0;
+    this.jy = 0;
+    this.jitterMs = 0;
+    this.p = PERSONALITIES[(variant % PERSONALITIES.length + PERSONALITIES.length) % PERSONALITIES.length];
+    this.personality = this.p.name;
+    this.strafeSign = Math.random() < 0.5 ? 1 : -1;
+  }
+  /** Cube vivant le plus proche + sa distance (Infinity si aucun). */
+  nearestCube(self, world) {
+    let cube = null;
+    let cd = Infinity;
+    for (const q of world.cubes) {
+      if (!q.alive) continue;
+      const d = Math.hypot(q.x - self.x, q.y - self.y);
+      if (d < cd) {
+        cd = d;
+        cube = q;
+      }
+    }
+    return { cube, d: cd };
   }
   update(self, world, dtMs) {
     const inp = emptyInput();
@@ -25246,7 +25275,14 @@ var BattleBot = class {
       }
     }
     const range = self.def.attack.range;
-    const lowHp = self.healthRatio < 0.3;
+    const lowHp = self.healthRatio < this.p.fleeHp;
+    this.jitterMs -= dtMs;
+    if (this.jitterMs <= 0) {
+      const a = Math.random() * Math.PI * 2;
+      this.jx = Math.cos(a);
+      this.jy = Math.sin(a);
+      this.jitterMs = 500;
+    }
     let outside = false;
     let retreat = null;
     if (world.danger) {
@@ -25285,25 +25321,40 @@ var BattleBot = class {
       move(retreat.x - self.x, retreat.y - self.y);
       if (foe && fd < range) shootAt(foe);
     } else if (lowHp && foe) {
-      move(self.x - foe.x, self.y - foe.y);
+      const away = norm(self.x - foe.x, self.y - foe.y);
+      const perp = { x: -away.y * this.strafeSign, y: away.x * this.strafeSign };
+      move(away.x + perp.x * 0.4 + this.jx * this.p.jitter, away.y + perp.y * 0.4 + this.jy * this.p.jitter);
       if (fd < range) shootAt(foe);
     } else if (foe) {
-      if (fd > range * 0.85) move(foe.x - self.x, foe.y - self.y);
-      else if (fd < range * 0.4) move(self.x - foe.x, self.y - foe.y);
+      const want = range * this.p.preferredRange;
+      const margin = range * 0.12;
+      const toFoe = norm(foe.x - self.x, foe.y - self.y);
+      let radial = 0;
+      if (fd > want + margin) radial = 1;
+      else if (fd < want - margin) radial = -1;
+      const perp = { x: -toFoe.y * this.strafeSign, y: toFoe.x * this.strafeSign };
+      let mx = toFoe.x * radial + perp.x * this.p.strafe + this.jx * this.p.jitter;
+      let my = toFoe.y * radial + perp.y * this.p.strafe + this.jy * this.p.jitter;
+      const { cube, d: cd } = this.nearestCube(self, world);
+      const oppReach = 90 + this.p.cubeGreed * 260;
+      if (cube && cd < oppReach) {
+        const toCube = norm(cube.x - self.x, cube.y - self.y);
+        const pull = Math.max(0, 1 - cd / oppReach) * (0.7 + this.p.cubeGreed);
+        mx += toCube.x * pull;
+        my += toCube.y * pull;
+      }
+      move(mx, my);
       if (fd < range) shootAt(foe);
     } else {
-      let cube = null;
-      let cd = Infinity;
-      for (const q of world.cubes) {
-        if (!q.alive) continue;
-        const d = Math.hypot(q.x - self.x, q.y - self.y);
-        if (d < cd) {
-          cd = d;
-          cube = q;
-        }
+      const { cube, d: cd } = this.nearestCube(self, world);
+      const cubeReach = 120 + this.p.cubeGreed * 700;
+      if (cube && cd < cubeReach) {
+        move(cube.x - self.x + this.jx * this.p.jitter, cube.y - self.y + this.jy * this.p.jitter);
+      } else if (Math.hypot(this.wx - self.x, this.wy - self.y) > 80) {
+        move(this.wx - self.x + this.jx * this.p.jitter * 40, this.wy - self.y + this.jy * this.p.jitter * 40);
+      } else {
+        move(this.jx, this.jy);
       }
-      if (cube) move(cube.x - self.x, cube.y - self.y);
-      else if (Math.hypot(this.wx - self.x, this.wy - self.y) > 80) move(this.wx - self.x, this.wy - self.y);
     }
     return inp;
   }

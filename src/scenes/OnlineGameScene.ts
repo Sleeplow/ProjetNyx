@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import type { Room } from 'colyseus.js';
+import { Client, type Room } from 'colyseus.js';
+import { serverUrl } from '../net/config';
 import { PlayerController } from '../input/PlayerController';
 import { PITCH_NYXT } from '../maps/pitchNyxt';
 import { PORTAL_ARENA, PORTAL_REGIONS } from '../maps/portalArena';
@@ -39,6 +40,9 @@ function zdef(id: string): ZarekDef {
  */
 export class OnlineGameScene extends Phaser.Scene {
   private room!: Room;
+  private intentionalLeave = false; // vrai quand le joueur quitte volontairement (bouton Quitter)
+  private reconnecting = false;
+  private reconnectText?: Phaser.GameObjects.Text;
   private zarekId = ZAREKS[0].id;
   private controller!: PlayerController;
   private snap: MatchSnapshot | null = null;
@@ -139,17 +143,16 @@ export class OnlineGameScene extends Phaser.Scene {
     this.camY = acy;
     this.cameras.main.centerOn(this.camX, this.camY);
 
-    this.room.onMessage('snap', (s: MatchSnapshot) => {
-      this.snap = s;
-      this.playFx(s.fx);
-    });
-    this.room.onError((code, message) => this.leave(`Erreur ${code} : ${message ?? ''}`));
-    this.room.onLeave(() => this.scene.isActive('OnlineGame') && this.leave());
+    this.intentionalLeave = false;
+    this.reconnecting = false;
+    this.attachRoomHandlers();
 
     this.events.once('shutdown', () => {
       this.controller.destroy();
       this.destroyOverlay();
       this.teardownSpectate();
+      this.reconnectText?.destroy();
+      this.reconnectText = undefined;
     });
   }
 
@@ -186,7 +189,7 @@ export class OnlineGameScene extends Phaser.Scene {
         this.predX = Phaser.Math.Linear(this.predX, me.x, k);
         this.predY = Phaser.Math.Linear(this.predY, me.y, k);
       }
-      this.room.send('input', input);
+      if (!this.reconnecting) this.room.send('input', input);
     } else if (me) {
       this.predX = me.x;
       this.predY = me.y;
@@ -561,7 +564,90 @@ export class OnlineGameScene extends Phaser.Scene {
 
   // ---------- Divers ----------
 
+  /** (Re)branche les écouteurs du salon (appelé au démarrage ET après reconnexion). */
+  private attachRoomHandlers(): void {
+    this.room.onMessage('snap', (s: MatchSnapshot) => {
+      this.snap = s;
+      this.playFx(s.fx);
+    });
+    this.room.onError((code, message) => this.onDisconnect(code, message));
+    this.room.onLeave((code) => this.onDisconnect(typeof code === 'number' ? code : undefined));
+  }
+
+  /** Déconnexion (erreur ou fermeture) : version périmée → on quitte ; sinon on tente de se reconnecter. */
+  private onDisconnect(code?: number, message?: string): void {
+    if (this.intentionalLeave || !this.scene.isActive('OnlineGame')) return;
+    if (code === 4001) {
+      this.leave(`Version périmée : ${message ?? ''}`);
+      return;
+    }
+    void this.tryReconnect();
+  }
+
+  /**
+   * Reconnexion automatique après une déconnexion subie : le serveur garde la
+   * place ~20 s (voir GameRoom). On réessaie quelques fois avec le jeton de
+   * reconnexion, puis on rebranche les écouteurs sur le nouveau salon.
+   */
+  private async tryReconnect(): Promise<void> {
+    if (this.reconnecting) return;
+    const token = this.room?.reconnectionToken;
+    if (!token) {
+      this.leave('Connexion perdue');
+      return;
+    }
+    this.reconnecting = true;
+    this.showReconnect('Reconnexion…');
+    const client = new Client(serverUrl());
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        const room = (await client.reconnect(token)) as Room;
+        if (!this.scene.isActive('OnlineGame')) {
+          room.leave();
+          return;
+        }
+        this.room = room;
+        this.attachRoomHandlers();
+        this.reconnecting = false;
+        this.hideReconnect();
+        return;
+      } catch {
+        this.showReconnect(`Reconnexion… (${attempt}/5)`);
+        await this.wait(1500);
+      }
+    }
+    this.reconnecting = false;
+    this.leave('Reconnexion impossible');
+  }
+
+  private wait(ms: number): Promise<void> {
+    return new Promise((resolve) => this.time.delayedCall(ms, resolve));
+  }
+
+  private showReconnect(msg: string): void {
+    if (!this.reconnectText) {
+      this.reconnectText = this.add
+        .text(this.scale.width / 2, this.scale.height / 2, msg, {
+          fontFamily: 'system-ui, sans-serif',
+          fontSize: '22px',
+          color: '#ffcf33',
+          backgroundColor: '#000000cc',
+          padding: { x: 18, y: 12 },
+        })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(2000);
+    } else {
+      this.reconnectText.setText(msg).setVisible(true);
+    }
+  }
+
+  private hideReconnect(): void {
+    this.reconnectText?.setVisible(false);
+  }
+
   private leave(message?: string): void {
+    this.intentionalLeave = true;
     try {
       this.room?.leave();
     } catch {

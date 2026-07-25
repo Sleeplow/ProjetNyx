@@ -20,8 +20,8 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@colyseus/core": "^0.16.24",
     "@colyseus/ws-transport": "^0.16.5",
-    "colyseus": "^0.16.5",
     "colyseus.js": "^0.16.22",
     "phaser": "^3.87.0"
   },

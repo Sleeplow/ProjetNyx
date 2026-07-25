@@ -80,6 +80,19 @@ ExecStart=/usr/bin/node ${APP_DIR}/nyxt-server.cjs
 Restart=always
 RestartSec=3
 
+# Durcissement (défense en profondeur) : le serveur ne fait qu'exécuter du JS et
+# écouter un port ; il n'écrit rien sur le disque et n'a besoin d'aucun privilège.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Borne la mémoire (petite VM) : en cas de fuite, systemd redémarre le service.
+MemoryMax=512M
+
 [Install]
 WantedBy=multi-user.target
 EOF

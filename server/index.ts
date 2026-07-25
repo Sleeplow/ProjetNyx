@@ -1,4 +1,4 @@
-import { Server } from 'colyseus';
+import { Server } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { GameRoom } from './GameRoom';
 
@@ -21,7 +21,10 @@ const port = Number(process.env.PORT) || 2567;
  * ajouter via la variable d'env `NYXT_ALLOWED_ORIGINS` (hôtes séparés par des virgules).
  */
 function isAllowedOrigin(origin?: string): boolean {
-  if (!origin) return false;
+  // Les navigateurs envoient TOUJOURS une Origin pour un WebSocket. Un client
+  // sans Origin (client natif, script de test) n'est accepté que si on l'a
+  // explicitement autorisé via `NYXT_ALLOW_NO_ORIGIN=1` (désactivé par défaut).
+  if (!origin) return process.env.NYXT_ALLOW_NO_ORIGIN === '1';
   let host: string;
   try {
     host = new URL(origin).hostname;

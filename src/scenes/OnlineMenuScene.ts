@@ -139,12 +139,47 @@ export class OnlineMenuScene extends Phaser.Scene {
     this.setStatus('Connexion…', '#ffcf33');
     try {
       const room = await connect();
+      // Connexion réussie : on réarme la possibilité de recharger sur un futur
+      // décalage de version (voir handleVersionMismatch).
+      try {
+        sessionStorage.removeItem('nyxt.reloaded');
+      } catch {
+        /* sessionStorage indisponible */
+      }
       this.setStatus('Connecté !', '#46d160');
       this.scene.start('OnlineGame', { room, zarekId: this.zarekId, modeId: this.modeId });
     } catch (err) {
       this.busy = false;
+      if (this.isVersionMismatch(err)) {
+        this.handleVersionMismatch();
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       this.setStatus(`Échec : ${msg}`, '#ff6b5e');
+    }
+  }
+
+  /** Le serveur a refusé le client car sa version de protocole ne correspond pas. */
+  private isVersionMismatch(err: unknown): boolean {
+    const e = err as { code?: number; message?: string } | undefined;
+    return e?.code === 4001 || /VERSION_MISMATCH/i.test(e?.message ?? '');
+  }
+
+  /** Version périmée : on recharge une fois pour récupérer la version fraîche. */
+  private handleVersionMismatch(): void {
+    this.setStatus('Nouvelle version disponible — rechargement…', '#ffcf33');
+    let alreadyReloaded = false;
+    try {
+      alreadyReloaded = sessionStorage.getItem('nyxt.reloaded') === '1';
+      if (!alreadyReloaded) sessionStorage.setItem('nyxt.reloaded', '1');
+    } catch {
+      /* sessionStorage indisponible : on recharge quand même une fois */
+    }
+    // Garde-fou anti-boucle : un seul rechargement automatique par session.
+    if (!alreadyReloaded) {
+      this.time.delayedCall(900, () => location.reload());
+    } else {
+      this.setStatus('Version périmée. Recharge la page (⟳) pour continuer.', '#ff6b5e');
     }
   }
 

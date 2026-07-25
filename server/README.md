@@ -84,6 +84,29 @@ répond pas après redémarrage.
 
 Mise à jour manuelle si besoin : relancer `sudo bash setup.sh`.
 
+### Mises à jour de la MACHINE (OS / kernel / Node / Caddy)
+
+L'auto-updater ci-dessus ne met à jour que **le jeu**. La **machine** elle-même
+(Ubuntu, kernel, OpenSSL, OpenSSH…) est patchée automatiquement par
+`unattended-upgrades`, installé par `setup.sh` :
+
+- **Correctifs de sécurité OS** appliqués tout seuls ; **reboot auto à 4 h** si un
+  correctif kernel l'exige (le jeu redémarre au boot).
+- **Savoir ce qui est en attente** (si tu te connectes) :
+  ```bash
+  apt list --upgradable              # paquets à mettre à jour
+  test -f /var/run/reboot-required && echo "reboot requis"
+  cat /var/log/unattended-upgrades/unattended-upgrades.log   # ce qui a été appliqué
+  ```
+  *(La bannière SSH d'Ubuntu affiche déjà « X updates » et « reboot required ».)*
+- **Node & Caddy** (dépôts tiers, hors sécurité Ubuntu) ne montent pas de version
+  majeure tout seuls. Pour les rafraîchir dans leur version majeure, une fois de
+  temps en temps :
+  ```bash
+  sudo apt-get update && sudo apt-get install -y --only-upgrade nodejs caddy
+  sudo systemctl restart nyxt-server && sudo systemctl reload caddy
+  ```
+
 ## Tunnel (dépannage / test rapide seulement)
 
 Pour tester vite sans machine dédiée, un tunnel donne une URL publique **wss://**

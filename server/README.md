@@ -66,7 +66,34 @@ domaine) pointe dessus. Plus d'URL au hasard.
    seul, et **obtient le certificat HTTPS automatiquement** pour le domaine.
 
 Ensuite le jeu se connecte à `wss://gamenyxt.sleeplow.ca` sans rien à configurer.
-Mettre le serveur à jour = relancer `sudo bash setup.sh`.
+Mettre le serveur à jour manuellement = relancer `sudo bash setup.sh`.
+
+### Mise à jour AUTOMATIQUE (sans SSH) — runner GitHub Actions
+
+Pour ne plus avoir à se connecter en SSH à chaque mise à jour serveur, on installe
+**une fois** un runner GitHub Actions auto-hébergé sur la VM. Le déploiement
+devient alors une **Action GitHub** :
+
+- **automatique** à chaque promotion `qa → main` qui change le bundle serveur ;
+- **à la demande** via le bouton *Actions → « Déploie le serveur (VM) » → Run workflow*.
+
+Le runner « tire » les jobs en sortie (aucun port entrant à ouvrir, aucun secret
+SSH stocké). Le workflow (`.github/workflows/deploy-server.yml`) tourne sur la VM
+et se contente de copier le bundle + redémarrer le service, puis vérifie `/health`.
+
+Installation (une seule fois) :
+
+1. Sur GitHub : dépôt → **Settings → Actions → Runners → New self-hosted runner**
+   (Linux). Copie le **token** d'enregistrement affiché.
+2. Sur la VM :
+   ```bash
+   export RUNNER_TOKEN=LE_TOKEN_COPIÉ
+   curl -fsSL https://raw.githubusercontent.com/Sleeplow/ProjetNyx/main/server/deploy/setup-runner.sh -o setup-runner.sh
+   sudo -E bash setup-runner.sh
+   ```
+
+Le runner suit la VM (redémarre au boot). À partir de là, plus besoin de SSH : on
+merge, et le serveur se met à jour tout seul.
 
 ## Tunnel (dépannage / test rapide seulement)
 

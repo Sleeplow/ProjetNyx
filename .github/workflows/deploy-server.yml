@@ -1,0 +1,58 @@
+name: Déploie le serveur (VM)
+
+# Met à jour le serveur de jeu sur la VM SANS SSH, via un runner GitHub Actions
+# auto-hébergé sur la machine (voir server/deploy/setup-runner.sh).
+#
+# Déclencheurs :
+#   - promotion vers `main` qui change le bundle serveur → déploiement AUTO ;
+#   - bouton « Run workflow » (workflow_dispatch) → déploiement À LA DEMANDE, sur
+#     la branche choisie (pratique pour pousser un serveur de test depuis `qa`).
+#
+# SÉCURITÉ : jamais déclenché par `pull_request` — un runner auto-hébergé ne doit
+# pas exécuter de code de PR non fusionnée. Seuls le push sur `main` (déjà
+# fusionné) et le déclenchement manuel (réservé aux personnes ayant le droit
+# d'écrire) font tourner ce workflow.
+on:
+  push:
+    branches: [main]
+    paths: ['server/nyxt-server.cjs']
+  workflow_dispatch:
+
+# Un seul déploiement à la fois.
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # Tourne sur le runner installé sur la VM (label « nyxt »).
+    runs-on: [self-hosted, nyxt]
+    steps:
+      - name: Récupère le bundle serveur
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: server/nyxt-server.cjs
+          sparse-checkout-cone-mode: false
+
+      - name: Installe le bundle et redémarre le service
+        run: |
+          set -euo pipefail
+          install -m 0644 server/nyxt-server.cjs /opt/nyxt/nyxt-server.cjs
+          sudo systemctl restart nyxt-server
+
+      - name: Vérifie la santé du serveur
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 10); do
+            if curl -fsS "http://127.0.0.1:${HEALTH_PORT:-2568}/health" > /dev/null; then
+              echo "Serveur en bonne santé ✅"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Le serveur n'a pas répondu sur /health après redémarrage."
+          journalctl -u nyxt-server -n 30 --no-pager || true
+          exit 1

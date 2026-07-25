@@ -5,7 +5,7 @@ et pistes de features pour rapprocher le jeu de l'esprit **Brawl Stars** (« ver
 Dylan »). Ce fichier suit ce qui est **fait**, ce qui **reste à faire**, et les
 notes associées.
 
-> Dernière mise à jour : 2026-07-24
+> Dernière mise à jour : 2026-07-25
 
 **Légende de statut**
 - ✅ **Fait** — livré (voir le journal en bas)
@@ -25,17 +25,22 @@ client, HTTPS/WSS automatique via Caddy.
 
 ### 🔴 Priorité haute
 
-#### 1.1 Dépendances vulnérables — 🔧 Partiel
-`npm audit` : 13 avis (2 faibles, 11 modérés).
-- **`colyseus` 0.16 → `nanoid` < 3.3.8** (IDs prévisibles). Pertinent car **l'id
-  de salon sert de « code » à partager** : des IDs devinables affaiblissent ce
-  mécanisme. → **Correctif : Colyseus 0.17.** ⏳ 🖥️ (rebuild + redeploy serveur)
-- **`esbuild`/`vite` 5** (GHSA-67mh-4wv8-2f99) : un site tiers peut interroger le
-  serveur de dev et lire les réponses. Aggravé par `server: { host: true }`.
-  Impact **dev uniquement**. → **Correctif : Vite 7** (breaking). ⏳
-- `uuid`, `elliptic` via `@colyseus/auth` (non utilisé, hors bundle serveur). ⏳
-- ✅ **Fait :** `.github/dependabot.yml` ajouté (surveillance hebdo npm + actions)
-  — signalera automatiquement ces mises à jour à l'avenir.
+#### 1.1 Dépendances vulnérables — ✅ Quasi résolu (13 → 3, PR #21)
+`npm audit` est passé de **13 avis à 3** ; les 3 restants (`nanoid`) ne nous
+concernent pas (voir plus bas).
+- **`esbuild`/`vite` 5** (GHSA-67mh-4wv8-2f99, dev-server) → ✅ **corrigé : Vite 7**
+  (+ CI Node 22). Aucun impact runtime.
+- **`uuid`, `elliptic`** via `@colyseus/auth` (inutilisé) → ✅ **éliminés** : on
+  n'importe plus le méta-paquet `colyseus` mais **`@colyseus/core` directement**
+  (retire aussi monitor/playground → bundle serveur plus léger).
+- **`colyseus` 0.16 → `nanoid` < 3.3.8** (IDs « prévisibles ») → **laissé en 0.16.**
+  Deux raisons : (1) la faille vise les tailles *non entières* ; Colyseus utilise
+  une taille fixe → **non exploitable ici** ; (2) surtout, **le bump 0.17 est
+  impossible** : il n'existe **aucun client `colyseus.js` compatible 0.17** (le
+  dernier, 0.16.22, ne sait pas parler au matchmaking 0.17) — monter le serveur
+  en 0.17 casserait le jeu en ligne pour *tous* les clients. À revoir si/quand un
+  `colyseus.js` 0.17 est publié.
+- ✅ `.github/dependabot.yml` (surveillance hebdo npm + actions).
 
 #### 1.2 CI : token en écriture sur le job qui exécute le code des PR — ✅ Fait
 `deploy.yml` déclarait `permissions: contents: write` **au niveau global** : le
@@ -54,14 +59,15 @@ ne peut plus être injectée par un lien (PR #15).
 
 ### 🟠 Priorité moyenne
 
-#### 1.4 Serveur de jeu : garde-fous anti-abus — 🔧 Partiel
+#### 1.4 Serveur de jeu : garde-fous anti-abus — ✅ Fait
 La VM Oracle Always Free est petite ; plusieurs manques la rendaient facile à saturer.
 - **Limite de salons** : ✅ plafond `MAX_ROOMS = 50` (`ServerError 4002` au-delà) (PR #19).
 - **`maxPayload`** : ✅ borné à 16 Ko sur le WebSocket (PR #19).
 - **Vérification d'`Origin`** : ✅ poignée de main WS restreinte à `*.sleeplow.ca` /
-  `localhost` / LAN, extensible via `NYXT_ALLOWED_ORIGINS` (PR #19).
-- **Rate-limit** des messages / IP : ⏳ 🖥️ reste à ajouter (côté Caddy, ou par
-  fréquence de messages).
+  `localhost` / LAN, extensible via `NYXT_ALLOWED_ORIGINS` ; opt-in sans-Origin via
+  `NYXT_ALLOW_NO_ORIGIN` (PR #19 / #21).
+- **Rate-limit** des messages : ✅ backstop `MAX_MSGS_PER_SEC = 240` par client
+  (très au-dessus du débit légitime, coupe un flood) (PR #21).
 
 #### 1.5 Salons « privés » pas vraiment privés — ✅ Fait (PR #19)
 `client.create('nyxt', …)` créait un salon **public** : un inconnu en « Match
@@ -76,13 +82,13 @@ le code de salon devient le seul moyen d'entrer.
 - **Service worker** (`public/sw.js`) : mettait en cache **tous** les GET, toutes
   origines, y compris les erreurs (une 404 pouvait devenir la page d'accueil
   hors-ligne). ✅ **Fait :** cache limité au **même-origine + réponses `ok`** (PR #14).
-- `tsx` en `dependencies` alors qu'il ne sert qu'en dev → à déplacer en
-  `devDependencies` (réduit la surface prod). ⏳ *(non fait : impose une mise à
-  jour du lockfile / re-sync `npm ci` ; faible valeur, gardé pour un lot deps).*
+- `tsx` en `dependencies` alors qu'il ne sert qu'en dev → ✅ **déplacé en
+  `devDependencies`** (PR #21).
 - Bundle `server/nyxt-server.cjs` commité et téléchargé en prod depuis `qa` :
   fonctionne, mais un build en CI serait plus traçable. ⏳ 🖥️
-- Durcissement `systemd` dans `setup-oracle.sh` (`NoNewPrivileges=true`,
-  `ProtectSystem=strict`, `MemoryMax=`). ⏳ 🖥️
+- Durcissement `systemd` dans `setup-oracle.sh` → ✅ **fait** (`NoNewPrivileges`,
+  `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `MemoryMax=512M`…) (PR #21 ;
+  appliqué au prochain `sudo bash setup.sh`).
 
 ---
 
@@ -209,7 +215,7 @@ jamais purgé.
 - Récupération d'une app déjà cassée : vider Réglages → Safari → Avancé →
   Données de site web ; ensuite la purge devient automatique au lancement en ligne.
 
-### PR #19 — Durcissement serveur *(fusionnée dans `qa` ; redéploiement VM requis)*
+### PR #19 — Durcissement serveur *(fusionnée dans `qa`/`main` ; redéploiement VM requis)*
 - **Handshake de version** client ↔ serveur : `src/shared/version.ts` (nouveau),
   envoi côté `NetClient`, refus côté `GameRoom.onAuth` (tolérant aux clients sans
   version), rechargement guidé côté `OnlineMenuScene`.
@@ -217,18 +223,32 @@ jamais purgé.
 - **Garde-fous** : plafond de salons (50), `maxPayload` 16 Ko, vérification d'`Origin`.
 - **Sanitize serveur** du pseudo (longueur + caractères de contrôle).
 
+### PR #20 — Promotion `qa` → `main` *(fusionnée)*
+Mise en production de tout le travail précédent (#14 → #19).
+
+### PR #21 — Nettoyage des dépendances + fin des garde-fous *(redéploiement VM requis)*
+- **Vite 5 → 7** (ferme l'avis esbuild dev-server) + CI **Node 22** + `tsx` en devDeps.
+- **`@colyseus/core` direct** au lieu du méta-paquet `colyseus` → retire
+  `@colyseus/auth` (elliptic/uuid) et monitor/playground. **`npm audit` : 13 → 3.**
+  *(Bump 0.17 abandonné : aucun client `colyseus.js` compatible — cf. §1.1.)*
+- **Rate-limit** serveur (240 msg/s/client) ; opt-in `NYXT_ALLOW_NO_ORIGIN`.
+- **Durcissement systemd** dans `setup-oracle.sh`.
+- Compat client 0.16.22 ↔ serveur (join, synchro d'état, snapshot, handshake)
+  **validée localement**.
+
 ---
 
 ## 4. À faire ensuite (résumé)
 
 | # | Sujet | Statut | Note |
 |---|---|---|---|
-| Sécu | Colyseus 0.17 (faille `nanoid`) | ⏳ 🖥️ | IDs de salon devinables |
-| Sécu | Vite 7 (faille dev-server esbuild) | ⏳ | impact dev seulement |
-| Sécu | Rate-limit messages / IP | ⏳ 🖥️ | reste des garde-fous (Caddy) |
-| Sécu | `tsx` → `devDependencies`, durcissement systemd | ⏳ | hygiène |
-| Réseau | Durcir le handshake (refuser l'absence de `v`) | ⏳ 🖥️ | une fois prod à jour |
+| Sécu | `nanoid` (Colyseus 0.16) | ⚪ Sans objet | non exploitable (ID taille fixe) ; bump 0.17 bloqué (pas de client compatible) |
+| Réseau | Durcir le handshake (refuser l'absence de `v`) | ⏳ 🖥️ | une fois les vieux clients prod expirés |
+| Infra | Build du bundle serveur en CI (traçabilité) | ⏳ | hygiène |
 | Feat 1 | Sons & musique | ⏳ | prochain — gros impact, petit effort |
 | Feat 2 | Trophées & déblocage Zareks | ⏳ | boucle de rétention |
 | Feat 3 | Gem Grab | ⏳ | mode emblématique |
 | Feat 4 | Duo Showdown | ⏳ | BR à deux |
+
+**Sécurité : plus rien de critique ni de moyen ne reste.** Les seuls items ouverts
+sont de l'hygiène/robustesse.

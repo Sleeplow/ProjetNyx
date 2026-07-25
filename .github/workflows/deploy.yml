@@ -12,9 +12,11 @@ on:
     branches: [main, qa]
   workflow_dispatch:
 
-# Droit d'écriture pour pousser sur la branche gh-pages.
+# Moindre privilège par défaut : le job `build` tourne aussi sur les PR (donc du
+# code non fusionné) — il ne doit disposer que de la lecture. Seuls les jobs de
+# déploiement élèvent ce droit à `contents: write` (voir plus bas).
 permissions:
-  contents: write
+  contents: read
 
 # Annule les runs redondants d'une même branche.
 concurrency:
@@ -44,6 +46,9 @@ jobs:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # Écriture nécessaire uniquement ici (pousser sur gh-pages).
+    permissions:
+      contents: write
     concurrency:
       group: gh-pages
       cancel-in-progress: false
@@ -69,6 +74,9 @@ jobs:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/qa'
     runs-on: ubuntu-latest
+    # Écriture nécessaire uniquement ici (pousser sur gh-pages).
+    permissions:
+      contents: write
     concurrency:
       group: gh-pages
       cancel-in-progress: false

@@ -1,0 +1,22 @@
+# Surveillance automatique des dépendances : Dependabot ouvre chaque semaine une
+# PR quand une mise à jour (dont une correction de faille) est disponible.
+# Couvre les paquets npm (jeu + serveur) et les actions GitHub du workflow CI.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      # Regroupe les mises à jour mineures/correctives en une seule PR (moins de bruit).
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

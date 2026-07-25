@@ -34910,7 +34910,17 @@ var ZEPHYR = {
     slowMs: 0,
     slowFactor: 1
   },
-  ultChargePerDamage: 0.06
+  ultChargePerDamage: 0.06,
+  sprite: {
+    dirs: 8,
+    yawOffsetDeg: 90,
+    // même bake camera qu'Atlas → même calibration
+    spin: -1,
+    scale: 0.405,
+    footY: 0,
+    idle: { key: "zephyr_idle", cols: 1, frameRate: 1 },
+    walk: { key: "zephyr_walk", cols: 8, frameRate: 10 }
+  }
 };
 
 // src/zareks/atlas.ts
@@ -34944,7 +34954,18 @@ var ATLAS = {
     slowMs: 3e3,
     slowFactor: 0.4
   },
-  ultChargePerDamage: 0.05
+  ultChargePerDamage: 0.05,
+  sprite: {
+    dirs: 8,
+    yawOffsetDeg: 90,
+    // calibré in-game : 0°(droite)→face captée à tort ; décalé pour que bas=face, haut=dos
+    spin: -1,
+    scale: 0.405,
+    // -10% (retour utilisateur : trop gros à 0.45)
+    footY: 0,
+    idle: { key: "atlas_idle", cols: 1, frameRate: 1 },
+    walk: { key: "atlas_walk", cols: 8, frameRate: 10 }
+  }
 };
 
 // src/zareks/hecate.ts
@@ -34984,7 +35005,16 @@ var HECATE = {
     poisonMs: 2500,
     poisonDps: 130
   },
-  ultChargePerDamage: 0.06
+  ultChargePerDamage: 0.06,
+  sprite: {
+    dirs: 8,
+    yawOffsetDeg: 90,
+    spin: -1,
+    scale: 0.405,
+    footY: 0,
+    idle: { key: "hecate_idle", cols: 1, frameRate: 1 },
+    walk: { key: "hecate_walk", cols: 8, frameRate: 10 }
+  }
 };
 
 // src/zareks/astrape.ts
@@ -35032,7 +35062,16 @@ var ASTRAPE = {
     // −25 % par cible touchée
   },
   // Charge d'ult au rythme normal (comme les autres mages).
-  ultChargePerDamage: 0.06
+  ultChargePerDamage: 0.06,
+  sprite: {
+    dirs: 8,
+    yawOffsetDeg: 90,
+    spin: -1,
+    scale: 0.405,
+    footY: 0,
+    idle: { key: "astrape_idle", cols: 1, frameRate: 1 },
+    walk: { key: "astrape_walk", cols: 8, frameRate: 10 }
+  }
 };
 
 // src/zareks/registry.ts
@@ -36523,8 +36562,15 @@ var MatchSim = class {
   }
 };
 
+// src/shared/version.ts
+var PROTOCOL_VERSION = 1;
+
 // server/GameRoom.ts
 var TICK_MS = 1e3 / 30;
+var MAX_ROOMS = 50;
+var activeRooms = 0;
+var ERR_VERSION_MISMATCH = 4001;
+var ERR_SERVER_FULL = 4002;
 var RoomInfo = class extends Schema {
   constructor() {
     super(...arguments);
@@ -36537,21 +36583,40 @@ var GameRoom = class extends Room {
     super(...arguments);
     this.maxClients = 6;
   }
-  onCreate(options) {
+  /**
+   * Handshake de version : refuse un client dont la version de protocole diffère.
+   * Tolérance transitoire — un client SANS version (d'avant le handshake, ex. la
+   * prod pas encore redéployée) est accepté le temps que ça se propage. À durcir
+   * (refuser aussi l'absence de `v`) une fois la prod à jour.
+   */
+  onAuth(_client, options) {
+    const v = options?.v;
+    if (typeof v === "number" && v !== PROTOCOL_VERSION) {
+      throw new ServerError(ERR_VERSION_MISMATCH, "VERSION_MISMATCH");
+    }
+    return true;
+  }
+  async onCreate(options) {
+    if (activeRooms >= MAX_ROOMS) throw new ServerError(ERR_SERVER_FULL, "SERVER_FULL");
+    activeRooms++;
     const mode = options?.mode === "battle-royale" ? "battle-royale" : options?.mode === "battle-royale-portal" ? "battle-royale-portal" : "brawl-ball";
     this.sim = new MatchSim(mode);
     const info = new RoomInfo();
     info.mode = mode;
     this.setState(info);
     this.setMetadata({ mode });
+    if (options?.private) await this.setPrivate(true);
     this.onMessage("input", (client, message) => this.sim.setInput(client.sessionId, sanitize(message)));
     this.onMessage("team", (client, message) => this.sim.chooseTeam(client.sessionId, message === 1 ? 1 : 0));
     this.onMessage("start", () => this.sim.requestStart());
     this.onMessage("rematch", () => this.sim.requestRematch());
     this.setSimulationInterval((dt) => this.tick(dt), TICK_MS);
   }
+  onDispose() {
+    activeRooms = Math.max(0, activeRooms - 1);
+  }
   onJoin(client, options) {
-    const name = (options?.name ?? "").trim().slice(0, 16) || "Joueur";
+    const name = (options?.name ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 16) || "Joueur";
     const zarek = typeof options?.zarek === "string" ? options.zarek : "zephyr";
     const team = options?.team === 1 ? 1 : 0;
     this.sim.addPlayer(client.sessionId, name, zarek, team);
@@ -36589,8 +36654,28 @@ function sanitize(msg) {
 
 // server/index.ts
 var port = Number(process.env.PORT) || 2567;
+function isAllowedOrigin(origin) {
+  if (!origin) return false;
+  let host;
+  try {
+    host = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+  if (host === "localhost" || host === "127.0.0.1") return true;
+  if (host === "sleeplow.ca" || host.endsWith(".sleeplow.ca")) return true;
+  if (/^192\.168\./.test(host) || /^10\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+  const extra = (process.env.NYXT_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return extra.includes(host);
+}
 var gameServer = new Server({
-  transport: new WebSocketTransport()
+  transport: new WebSocketTransport({
+    // Les messages de jeu sont minuscules (intentions) : 16 Ko borne largement
+    // les envois abusifs sans risque de couper une communication légitime.
+    maxPayload: 16 * 1024,
+    // Filtrage d'origine sur la poignée de main WebSocket.
+    verifyClient: (info, next) => next(isAllowedOrigin(info.origin))
+  })
 });
 gameServer.define("nyxt", GameRoom).filterBy(["mode"]);
 gameServer.listen(port).then(() => console.log(`\u26BD Serveur Nyxt en \xE9coute sur ws://localhost:${port}`)).catch((err) => {

@@ -1,3 +1,4 @@
+import http from 'http';
 import { Server } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { GameRoom } from './GameRoom';
@@ -43,6 +44,9 @@ function isAllowedOrigin(origin?: string): boolean {
 }
 
 const gameServer = new Server({
+  // Arrêt gracieux (défaut Colyseus) : sur SIGTERM/SIGINT (ex. redémarrage
+  // systemd), les salons sont fermés proprement avant de quitter.
+  gracefullyShutdown: true,
   transport: new WebSocketTransport({
     // Les messages de jeu sont minuscules (intentions) : 16 Ko borne largement
     // les envois abusifs sans risque de couper une communication légitime.
@@ -52,9 +56,29 @@ const gameServer = new Server({
   }),
 });
 
+gameServer.onShutdown(() => console.log('Arrêt gracieux du serveur Nyxt…'));
+
 // « nyxt » : le type de salon (create / joinById / joinOrCreate côté client).
 // filterBy(mode) : le match rapide ne mélange jamais Brawl Ball et Battle Royale.
 gameServer.define('nyxt', GameRoom).filterBy(['mode']);
+
+/**
+ * Sonde de santé sur un port SÉPARÉ, lié à 127.0.0.1 (interne à la machine) :
+ * n'interfère pas avec le matchmaking et n'est pas exposé au public. Sert à
+ * surveiller le process localement (`curl localhost:2568/health`).
+ */
+const healthPort = Number(process.env.HEALTH_PORT) || 2568;
+http
+  .createServer((req, res) => {
+    if (req.url === '/health') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, uptime: Math.round(process.uptime()), rss: process.memoryUsage().rss }));
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  })
+  .listen(healthPort, '127.0.0.1', () => console.log(`🩺 Sonde de santé sur http://127.0.0.1:${healthPort}/health`));
 
 gameServer
   .listen(port)

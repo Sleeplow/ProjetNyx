@@ -562,6 +562,33 @@ export class MatchSim {
     if (this.combatants.some((c) => c.id === id && !c.isBot)) this.inputs.set(id, input);
   }
 
+  /**
+   * Reconnexion — suspend un joueur déconnecté : sa place est jouée par un bot,
+   * mais on GARDE son id (= sessionId) pour qu'il la reprenne en revenant. En
+   * dehors d'un match (lobby / fin), on garde la place telle quelle (pas de bot).
+   */
+  suspendPlayer(id: string): void {
+    const c = this.combatants.find((k) => k.id === id && !k.isBot);
+    if (!c) return;
+    this.inputs.delete(id);
+    if (this.phase === 'lobby' || this.phase === 'ended') return;
+    c.isBot = true;
+    this.bots.set(id, this.isBR ? new BattleBot() : new SoccerBot(spawnsFor(c.team)[0].role));
+  }
+
+  /** Reconnexion — rend le contrôle humain d'une place suspendue. */
+  resumePlayer(id: string, name: string, zarekId: string): void {
+    const c = this.combatants.find((k) => k.id === id);
+    if (!c) return;
+    this.bots.delete(id);
+    c.isBot = false;
+    if (name) c.name = name;
+    if (ZAREK_BY_ID[zarekId]) {
+      c.zarekId = zarekId;
+      c.def = getZarek(zarekId);
+    }
+  }
+
   requestStart(): void {
     if (this.phase === 'lobby' && this.humanCount() > 0) this.startMatch();
   }

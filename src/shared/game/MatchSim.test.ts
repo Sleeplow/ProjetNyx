@@ -60,6 +60,24 @@ describe('MatchSim — Battle Royale', () => {
     expect(typeof snap.alive).toBe('number');
   });
 
+  it('suspend puis reprend une place en gardant l’id (reconnexion)', () => {
+    const sim = new MatchSim('battle-royale');
+    sim.addPlayer('p1', 'Alice', 'zephyr', 0);
+    sim.requestStart();
+    stepUntil(sim, (s) => s.phase === 'playing');
+    expect(sim.humanCount()).toBe(1);
+
+    // Déconnexion : la place est jouée par un bot, mais existe toujours (même id).
+    sim.suspendPlayer('p1');
+    expect(sim.humanCount()).toBe(0);
+    expect(sim.snapshot().players.find((p) => p.i === 'p1')?.bot).toBe(true);
+
+    // Reconnexion : le joueur reprend sa place.
+    sim.resumePlayer('p1', 'Alice', 'zephyr');
+    expect(sim.humanCount()).toBe(1);
+    expect(sim.snapshot().players.find((p) => p.i === 'p1')?.bot).toBe(false);
+  });
+
   it('la revanche remet en lobby', () => {
     const sim = new MatchSim('battle-royale');
     sim.addPlayer('p1', 'Alice', 'zephyr', 0);

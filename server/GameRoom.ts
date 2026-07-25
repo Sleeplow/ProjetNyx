@@ -1,4 +1,4 @@
-import { Room, type Client, ServerError } from 'colyseus';
+import { Room, type Client, ServerError } from '@colyseus/core';
 import { Schema, defineTypes } from '@colyseus/schema';
 import { MatchSim, type OnlineMode } from '../src/shared/game/MatchSim';
 import { emptyInput, type InputState } from '../src/core/types';
@@ -9,6 +9,14 @@ const TICK_MS = 1000 / 30; // 30 pas/seconde d'autorité serveur
 /** Plafond de salons simultanés (anti-abus : borne la charge de la petite VM). */
 const MAX_ROOMS = 50;
 let activeRooms = 0;
+
+/**
+ * Backstop anti-flood : nombre max de messages acceptés par client et par
+ * seconde. Très au-dessus du débit légitime (un client envoie ~1 input/frame,
+ * soit ≤ 120/s même sur écran 120 Hz) → ne gêne jamais le jeu, mais coupe un
+ * script qui inonderait le serveur de milliers de messages/seconde.
+ */
+const MAX_MSGS_PER_SEC = 240;
 
 /** Codes d'erreur renvoyés au client (interprétés côté OnlineMenuScene). */
 const ERR_VERSION_MISMATCH = 4001;
@@ -39,6 +47,20 @@ interface JoinOptions {
 export class GameRoom extends Room<RoomInfo> {
   maxClients = 6; // 6 humains max ; les places vides sont des bots (3v3 ou BR à 6)
   private sim!: MatchSim;
+  /** Fenêtre glissante (1 s) du nombre de messages reçus par client. */
+  private readonly msgWindow = new Map<string, { start: number; count: number }>();
+
+  /** Vrai si le client n'a pas dépassé le plafond de messages sur la seconde en cours. */
+  private rateOk(client: Client): boolean {
+    const now = Date.now();
+    const w = this.msgWindow.get(client.sessionId);
+    if (!w || now - w.start >= 1000) {
+      this.msgWindow.set(client.sessionId, { start: now, count: 1 });
+      return true;
+    }
+    w.count += 1;
+    return w.count <= MAX_MSGS_PER_SEC;
+  }
 
   /**
    * Handshake de version : refuse un client dont la version de protocole diffère.
@@ -71,10 +93,18 @@ export class GameRoom extends Room<RoomInfo> {
     // seul le code (id du salon) permet d'entrer.
     if (options?.private) await this.setPrivate(true);
 
-    this.onMessage('input', (client, message: InputState) => this.sim.setInput(client.sessionId, sanitize(message)));
-    this.onMessage('team', (client, message: number) => this.sim.chooseTeam(client.sessionId, message === 1 ? 1 : 0));
-    this.onMessage('start', () => this.sim.requestStart());
-    this.onMessage('rematch', () => this.sim.requestRematch());
+    this.onMessage('input', (client, message: InputState) => {
+      if (this.rateOk(client)) this.sim.setInput(client.sessionId, sanitize(message));
+    });
+    this.onMessage('team', (client, message: number) => {
+      if (this.rateOk(client)) this.sim.chooseTeam(client.sessionId, message === 1 ? 1 : 0);
+    });
+    this.onMessage('start', (client) => {
+      if (this.rateOk(client)) this.sim.requestStart();
+    });
+    this.onMessage('rematch', (client) => {
+      if (this.rateOk(client)) this.sim.requestRematch();
+    });
 
     this.setSimulationInterval((dt) => this.tick(dt), TICK_MS);
   }
@@ -95,6 +125,7 @@ export class GameRoom extends Room<RoomInfo> {
 
   onLeave(client: Client): void {
     this.sim.removePlayer(client.sessionId);
+    this.msgWindow.delete(client.sessionId);
     console.log(`[${this.roomId}] leave ${client.sessionId}`);
   }
 

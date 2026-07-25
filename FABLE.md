@@ -5,7 +5,7 @@ et pistes de features pour rapprocher le jeu de l'esprit **Brawl Stars** (« ver
 Dylan »). Ce fichier suit ce qui est **fait**, ce qui **reste à faire**, et les
 notes associées.
 
-> Dernière mise à jour : 2026-07-23
+> Dernière mise à jour : 2026-07-24
 
 **Légende de statut**
 - ✅ **Fait** — livré (voir le journal en bas)
@@ -54,25 +54,25 @@ ne peut plus être injectée par un lien (PR #15).
 
 ### 🟠 Priorité moyenne
 
-#### 1.4 Serveur de jeu : garde-fous anti-abus — ⏳ 🖥️
-La VM Oracle Always Free est petite ; plusieurs manques la rendent facile à saturer :
-- **Pas de limite de salons** : chaque `create`/`joinOrCreate` démarre une
-  simulation à 30 Hz → un script peut en créer des milliers.
-- **Pas de `maxPayload`** sur `WebSocketTransport` (défaut `ws` : 100 Mo/message).
-- **Pas de rate-limit** des messages `input`/`start`/`rematch`, ni de vérification d'`Origin`.
-→ Correctifs peu coûteux : `new WebSocketTransport({ maxPayload: 4096 })`, compteur
-global de salons (rejet au-delà de ~50), rate-limit IP côté Caddy.
+#### 1.4 Serveur de jeu : garde-fous anti-abus — 🔧 Partiel
+La VM Oracle Always Free est petite ; plusieurs manques la rendaient facile à saturer.
+- **Limite de salons** : ✅ plafond `MAX_ROOMS = 50` (`ServerError 4002` au-delà) (PR #19).
+- **`maxPayload`** : ✅ borné à 16 Ko sur le WebSocket (PR #19).
+- **Vérification d'`Origin`** : ✅ poignée de main WS restreinte à `*.sleeplow.ca` /
+  `localhost` / LAN, extensible via `NYXT_ALLOWED_ORIGINS` (PR #19).
+- **Rate-limit** des messages / IP : ⏳ 🖥️ reste à ajouter (côté Caddy, ou par
+  fréquence de messages).
 
-#### 1.5 Salons « privés » pas vraiment privés — ⏳ 🖥️
-`client.create('nyxt', …)` crée un salon **public** : un inconnu en « Match
-rapide » (`joinOrCreate`) peut atterrir dans le salon créé pour un ami.
-→ Correctif : flag `private` + `this.setPrivate()` dans `onCreate` → le code de
-salon devient le seul moyen d'entrer.
+#### 1.5 Salons « privés » pas vraiment privés — ✅ Fait (PR #19)
+`client.create('nyxt', …)` créait un salon **public** : un inconnu en « Match
+rapide » pouvait atterrir dans le salon créé pour un ami.
+→ **Fait :** « Créer un salon » passe `private` → `setPrivate()` dans `onCreate` ;
+le code de salon devient le seul moyen d'entrer.
 
 #### 1.6 Divers — 🔧 Partiel
 - **Pseudos** : caractères de contrôle acceptés → pollution des logs / de
-  l'affichage (pas d'XSS, rendu Phaser). ✅ **Filtré côté client** (PR #14) ;
-  ⏳ 🖥️ reste à filtrer **côté serveur** (`GameRoom`).
+  l'affichage (pas d'XSS, rendu Phaser). ✅ **Filtré côté client** (PR #14) **et
+  côté serveur** (`GameRoom`, PR #19).
 - **Service worker** (`public/sw.js`) : mettait en cache **tous** les GET, toutes
   origines, y compris les erreurs (une 404 pouvait devenir la page d'accueil
   hors-ligne). ✅ **Fait :** cache limité au **même-origine + réponses `ok`** (PR #14).
@@ -132,7 +132,10 @@ Rend le jeu en ligne « avec un ami » vraiment fun sans être l'un contre l'aut
 
 ## 2 bis. Robustesse réseau
 
-### 🔁 Vérification de version client ↔ serveur (handshake au join) — ⏳ 🖥️
+### 🔁 Vérification de version client ↔ serveur (handshake au join) — 🔧 Fait (PR #19)
+> **Code livré** (client + serveur). Actif une fois la VM redéployée. Tolérance
+> transitoire : les clients sans version (prod pas encore à jour) sont acceptés ;
+> à durcir (refuser aussi l'absence de `v`) quand prod aura le client à jour.
 **Empêche un client périmé de jouer avec un serveur incompatible.** Un onglet
 resté ouvert, un cache tenace ou un déploiement décalé peut faire tourner une
 **vieille version** de la page qui parle un protocole différent du serveur
@@ -169,8 +172,8 @@ que les deux côtés doivent partager.
 
 ## 3. Journal des changements réalisés
 
-Tous côté **page web** (déployés via le flux gh-pages `qa` → `/qa/`, sans toucher
-au serveur de jeu).
+Sauf mention contraire, côté **page web** (flux gh-pages `qa` → `/qa/`). La PR #19
+touche aussi le **serveur** (redéploiement VM requis).
 
 ### PR #14 — Sécurité (page web) *(fusionnée dans `qa`)*
 - Validation de l'URL serveur `?server=` (`ws://`/`wss://`) + purge des valeurs piégées.
@@ -206,6 +209,14 @@ jamais purgé.
 - Récupération d'une app déjà cassée : vider Réglages → Safari → Avancé →
   Données de site web ; ensuite la purge devient automatique au lancement en ligne.
 
+### PR #19 — Durcissement serveur *(fusionnée dans `qa` ; redéploiement VM requis)*
+- **Handshake de version** client ↔ serveur : `src/shared/version.ts` (nouveau),
+  envoi côté `NetClient`, refus côté `GameRoom.onAuth` (tolérant aux clients sans
+  version), rechargement guidé côté `OnlineMenuScene`.
+- **Rooms privées** : « Créer un salon » → `setPrivate()`.
+- **Garde-fous** : plafond de salons (50), `maxPayload` 16 Ko, vérification d'`Origin`.
+- **Sanitize serveur** du pseudo (longueur + caractères de contrôle).
+
 ---
 
 ## 4. À faire ensuite (résumé)
@@ -214,11 +225,9 @@ jamais purgé.
 |---|---|---|---|
 | Sécu | Colyseus 0.17 (faille `nanoid`) | ⏳ 🖥️ | IDs de salon devinables |
 | Sécu | Vite 7 (faille dev-server esbuild) | ⏳ | impact dev seulement |
-| Sécu | Garde-fous serveur (`maxPayload`, plafond salons, rate-limit, `Origin`) | ⏳ 🖥️ | anti-abus |
-| Sécu | Rooms privées (`setPrivate`) | ⏳ 🖥️ | « Créer un salon » réellement privé |
-| Sécu | Sanitize pseudo côté serveur | ⏳ 🖥️ | client déjà filtré |
+| Sécu | Rate-limit messages / IP | ⏳ 🖥️ | reste des garde-fous (Caddy) |
 | Sécu | `tsx` → `devDependencies`, durcissement systemd | ⏳ | hygiène |
-| Réseau | Handshake de version client ↔ serveur | ⏳ 🖥️ | client déployable seul ; enforcement = serveur |
+| Réseau | Durcir le handshake (refuser l'absence de `v`) | ⏳ 🖥️ | une fois prod à jour |
 | Feat 1 | Sons & musique | ⏳ | prochain — gros impact, petit effort |
 | Feat 2 | Trophées & déblocage Zareks | ⏳ | boucle de rétention |
 | Feat 3 | Gem Grab | ⏳ | mode emblématique |

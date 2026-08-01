@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { sfx } from '../audio/sfx';
+import { music } from '../audio/music';
+import { safeInsets } from './layout';
 
 export interface Button {
   container: Phaser.GameObjects.Container;
@@ -127,22 +129,99 @@ export function makeQuitButton(scene: Phaser.Scene, onConfirm: () => void): Phas
 }
 
 /**
- * Bouton coupe-son 🔊/🔇 (texte, `scrollFactor` 0). Le réglage persiste entre
- * les sessions (localStorage) — voir le moteur `sfx`. Le caller le positionne.
+ * Bouton ⚙ (texte, `scrollFactor` 0) qui ouvre l'écran de Configuration EN
+ * SURIMPRESSION — `scene.launch` et non `start` : la scène appelante reste
+ * vivante, donc on peut régler le son sans quitter une partie en cours.
+ * Le caller le positionne.
  */
-export function makeMuteButton(scene: Phaser.Scene): Phaser.GameObjects.Text {
-  const label = (): string => (sfx.muted ? '🔇' : '🔊');
-  const t = scene.add
-    .text(0, 0, label(), { fontFamily: 'system-ui, sans-serif', fontSize: '22px' })
+export function makeSettingsButton(scene: Phaser.Scene): Phaser.GameObjects.Text {
+  return scene.add
+    .text(0, 0, '⚙', { fontFamily: 'system-ui, sans-serif', fontSize: '24px', color: '#d8d8ff' })
     .setScrollFactor(0)
     .setDepth(1005)
-    .setInteractive({ useHandCursor: true });
-  t.on('pointerup', () => {
-    sfx.setMuted(!sfx.muted);
-    t.setText(label());
-    sfx.play('click'); // silencieux si on vient de couper — confirme la réactivation
+    .setInteractive({ useHandCursor: true })
+    .on('pointerup', () => {
+      sfx.play('click');
+      if (!scene.scene.isActive('Settings')) scene.scene.launch('Settings', { from: scene.scene.key });
+    });
+}
+
+/** Curseur de réglage (0 → 1) : rail, remplissage, poignée et valeur en %. */
+export interface Slider {
+  destroy(): void;
+}
+
+/**
+ * Curseur horizontal réutilisable. La valeur est mise à jour EN CONTINU pendant
+ * le glissement (`onChange`) : on entend le volume bouger pendant qu'on règle,
+ * ce qui est le seul moyen de régler un son « à l'oreille ».
+ *
+ * Le suivi du doigt/souris se fait sur la scène entière une fois la poignée
+ * saisie (et non sur le rail), sinon sortir un peu du rail en glissant coupe le
+ * réglage net.
+ */
+export function makeSlider(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  width: number,
+  initial: number,
+  onChange: (value: number) => void,
+  color = 0x6a4dff,
+): Slider {
+  const D = 1600;
+  const h = 10;
+  let value = Math.min(1, Math.max(0, initial));
+
+  const rail = scene.add.rectangle(x, y, width, h, 0x2a2350, 1).setStrokeStyle(2, 0x5a4a9a, 0.8).setScrollFactor(0).setDepth(D);
+  const fill = scene.add.rectangle(x - width / 2, y, width * value, h, color, 1).setOrigin(0, 0.5).setScrollFactor(0).setDepth(D + 1);
+  const knob = scene.add.circle(x - width / 2 + width * value, y, 15, 0xffffff, 1).setStrokeStyle(3, color, 1).setScrollFactor(0).setDepth(D + 2);
+  const pct = scene.add
+    .text(x + width / 2 + 18, y, `${Math.round(value * 100)}%`, { fontFamily: 'system-ui, sans-serif', fontSize: '17px', color: '#d8d8ff', fontStyle: 'bold' })
+    .setOrigin(0, 0.5)
+    .setScrollFactor(0)
+    .setDepth(D + 1);
+
+  const apply = (v: number): void => {
+    value = Math.min(1, Math.max(0, v));
+    fill.width = width * value;
+    knob.x = x - width / 2 + width * value;
+    pct.setText(`${Math.round(value * 100)}%`);
+    onChange(value);
+  };
+  const fromPointer = (px: number): void => apply((px - (x - width / 2)) / width);
+
+  // Zone de saisie généreuse (hauteur d'un doigt) couvrant tout le rail : un tap
+  // n'importe où saute à cette valeur, puis on peut glisser.
+  const zone = scene.add.zone(x, y, width + 44, 56).setScrollFactor(0).setDepth(D).setInteractive({ useHandCursor: true });
+  let dragging = false;
+
+  const onMove = (p: Phaser.Input.Pointer): void => {
+    if (dragging) fromPointer(p.x);
+  };
+  const onUp = (): void => {
+    dragging = false;
+  };
+  zone.on('pointerdown', (p: Phaser.Input.Pointer) => {
+    dragging = true;
+    fromPointer(p.x);
   });
-  return t;
+  scene.input.on('pointermove', onMove);
+  scene.input.on('pointerup', onUp);
+  scene.input.on('pointerupoutside', onUp);
+
+  return {
+    destroy: () => {
+      scene.input.off('pointermove', onMove);
+      scene.input.off('pointerup', onUp);
+      scene.input.off('pointerupoutside', onUp);
+      zone.destroy();
+      rail.destroy();
+      fill.destroy();
+      knob.destroy();
+      pct.destroy();
+    },
+  };
 }
 
 /**
@@ -151,9 +230,18 @@ export function makeMuteButton(scene: Phaser.Scene): Phaser.GameObjects.Text {
  * qui scintillent, halos colorés qui dérivent doucement. Volontairement discret
  * (faibles opacités) pour ne pas gêner la lecture des options par-dessus.
  */
-export function nightBackground(scene: Phaser.Scene): void {
+export function nightBackground(scene: Phaser.Scene, opts?: { settingsButton?: boolean }): void {
   const w = scene.scale.width;
   const h = scene.scale.height;
+
+  // Ce fond EST le marqueur « écran de menu » : on y accroche donc ce que tous
+  // les menus doivent avoir — le thème musical de menu et l'accès ⚙ — plutôt
+  // que de le répéter (et de l'oublier) dans chaque scène.
+  music.play('menu');
+  if (opts?.settingsButton !== false) {
+    const i = safeInsets();
+    makeSettingsButton(scene).setOrigin(1, 0).setPosition(w - 14 - i.right, 12 + i.top);
+  }
 
   const g = scene.add.graphics().setScrollFactor(0).setDepth(-100);
   g.fillGradientStyle(0x241a5c, 0x241a5c, 0x080610, 0x080610, 1);

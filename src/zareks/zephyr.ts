@@ -40,6 +40,8 @@ export const ZEPHYR: ZarekDef = {
     slowFactor: 1,
   },
   ultChargePerDamage: 0.06,
+  // Voix : bips d'enceinte pour les ondes, balayage + souffle pour le break dance.
+  sound: { attack: 'shoot_wave', ult: 'ult_wave' },
   sprite: {
     dirs: 8,
     yawOffsetDeg: 90, // même bake camera qu'Atlas → même calibration

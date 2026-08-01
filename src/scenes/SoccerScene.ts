@@ -12,6 +12,8 @@ import { drawCartoonPitch } from '../render/pitchRender';
 import { resolveChain } from '../shared/game/chain';
 import { drawChainBolt } from '../render/fx';
 import { sfx } from '../audio/sfx';
+import { music } from '../audio/music';
+import { attackSfx, ultSfx } from '../audio/zarekSfx';
 import { ZAREKS, getZarek } from '../zareks/registry';
 import { COLORS } from '../config/constants';
 import { TEAM, BALL, SOCCER } from '../config/soccer';
@@ -94,6 +96,7 @@ export class SoccerScene extends Phaser.Scene {
 
     this.hud.flash('COUP D’ENVOI', '#ffcf33');
     sfx.play('whistle');
+    music.play('match');
 
     this.events.once('shutdown', () => {
       this.playerController.destroy();
@@ -431,13 +434,13 @@ export class SoccerScene extends Phaser.Scene {
 
   private fireAttack(c: Combatant): void {
     const a = c.def.attack;
+    // Son SIGNATURE du Zarek (repli générique s'il n'en déclare pas).
+    sfx.play(attackSfx(c.def), { volume: this.sfxVol(c.x, c.y) });
     if (a.kind === 'potion') {
-      sfx.play('potion', { volume: this.sfxVol(c.x, c.y) });
       this.throwPotion(c);
     } else if (a.kind === 'chain') {
       this.fireChain(c);
     } else {
-      sfx.play('shoot', { volume: this.sfxVol(c.x, c.y) });
       const spread = Phaser.Math.DegToRad(a.spreadDeg);
       const dmg = a.damage * c.damageMult;
       const muzzle = c.def.radius + 6;
@@ -458,7 +461,6 @@ export class SoccerScene extends Phaser.Scene {
 
   /** Éclair en chaîne : foudroie l'ennemi (autre équipe) le plus proche puis rebondit. */
   private fireChain(c: Combatant): void {
-    sfx.play('bolt', { volume: this.sfxVol(c.x, c.y) });
     const a = c.def.attack;
     const enemies = this.combatants.filter((o) => o.alive && o.team !== c.team);
     const idx = resolveChain(
@@ -638,7 +640,7 @@ export class SoccerScene extends Phaser.Scene {
   }
 
   private fireUlt(c: Combatant): void {
-    sfx.play('ult', { volume: this.sfxVol(c.x, c.y) });
+    sfx.play(ultSfx(c.def), { volume: this.sfxVol(c.x, c.y) });
     const u = c.def.ultimate;
     if (u.kind === 'aura') {
       this.shockwaveFx(c.x, c.y, u.radius, COLORS.poison);

@@ -17,6 +17,8 @@ import { PortalSystem } from '../shared/game/portals';
 import { resolveChain } from '../shared/game/chain';
 import { drawChainBolt } from '../render/fx';
 import { sfx } from '../audio/sfx';
+import { music } from '../audio/music';
+import { attackSfx, ultSfx } from '../audio/zarekSfx';
 import { ZAREKS, getZarek } from '../zareks/registry';
 import { ROCK_KEYS, BUSH_KEYS, LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider, isInBush } from '../render/props';
 import { COLORS, POWER_CUBE, PLAYERS_PER_MATCH, BUSH } from '../config/constants';
@@ -124,6 +126,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isPortal) this.hud.setWarningText('☣ NEUROTOXINE');
     this.hud.flash(this.isPortal ? 'CHAMBRE NYXT — NEUROTOXINE !' : 'BATTLE ROYALE !', '#ffcf33');
     sfx.play('go');
+    music.play('match');
 
     this.events.once('shutdown', () => {
       this.playerController.destroy();
@@ -718,13 +721,13 @@ export class GameScene extends Phaser.Scene {
 
   private fireAttack(c: Combatant): void {
     const a = c.def.attack;
+    // Son SIGNATURE du Zarek (repli générique s'il n'en déclare pas).
+    sfx.play(attackSfx(c.def), { volume: this.sfxVol(c.x, c.y) });
     if (a.kind === 'potion') {
-      sfx.play('potion', { volume: this.sfxVol(c.x, c.y) });
       this.throwPotion(c);
     } else if (a.kind === 'chain') {
       this.fireChain(c);
     } else {
-      sfx.play('shoot', { volume: this.sfxVol(c.x, c.y) });
       const spread = Phaser.Math.DegToRad(a.spreadDeg);
       const dmg = a.damage * c.damageMult;
       const muzzle = c.def.radius + 6;
@@ -744,7 +747,6 @@ export class GameScene extends Phaser.Scene {
 
   /** Éclair en chaîne : foudroie l'ennemi le plus proche puis rebondit (dégâts décroissants). */
   private fireChain(c: Combatant): void {
-    sfx.play('bolt', { volume: this.sfxVol(c.x, c.y) });
     const a = c.def.attack;
     const enemies = this.combatants.filter((o) => o !== c && o.alive);
     const idx = resolveChain(
@@ -858,7 +860,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private fireUlt(c: Combatant): void {
-    sfx.play('ult', { volume: this.sfxVol(c.x, c.y) });
+    sfx.play(ultSfx(c.def), { volume: this.sfxVol(c.x, c.y) });
     const u = c.def.ultimate;
     if (u.kind === 'aura') {
       this.spawnPoisonAura(c);

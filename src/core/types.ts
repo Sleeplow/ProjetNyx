@@ -1,3 +1,7 @@
+import type { ZarekSound } from '../audio/names';
+
+export type { ZarekSound };
+
 /**
  * Types partagés du jeu.
  *
@@ -123,6 +127,12 @@ export interface ZarekDef {
    * soit plusieurs salves qui touchent — pas une seule.
    */
   ultChargePerDamage: number;
+  /**
+   * Sons SIGNATURE du Zarek (attaque / ultimate) : chacun a sa voix, on
+   * reconnaît à l'oreille qui tire. Absent → son générique selon le `kind`
+   * de l'attaque. Purement client : le serveur ignore ce champ.
+   */
+  sound?: ZarekSound;
   /** Rendu en sprite 3D→2D (skill `sprite-bake`) au lieu des formes vectorielles. Absent = rendu vectoriel (par défaut). */
   sprite?: ZarekSpriteDef;
 }

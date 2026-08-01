@@ -10,8 +10,10 @@ import { ZAREKS, ZAREK_BY_ID } from '../zareks/registry';
 import type { ZarekDef, MapDef } from '../core/types';
 import { stepMovement } from '../shared/game/movement';
 import { clamp, dist } from '../core/geometry';
-import { makeButton, makeMuteButton, makeQuitButton, type Button } from '../ui/widgets';
+import { makeButton, makeQuitButton, makeSettingsButton, type Button } from '../ui/widgets';
 import { sfx } from '../audio/sfx';
+import { music } from '../audio/music';
+import { attackSfx, ultSfx, zarekByFxColor } from '../audio/zarekSfx';
 import { safeInsets } from '../ui/layout';
 import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
@@ -81,7 +83,7 @@ export class OnlineGameScene extends Phaser.Scene {
   private hpText!: Phaser.GameObjects.Text;
   private ultFill!: Phaser.GameObjects.Rectangle;
   private bigText!: Phaser.GameObjects.Text;
-  private muteBtn!: Phaser.GameObjects.Text;
+  private settingsBtn!: Phaser.GameObjects.Text;
 
   // Overlays (salle d'attente / résultat)
   private overlayPhase = '';
@@ -159,6 +161,7 @@ export class OnlineGameScene extends Phaser.Scene {
 
     this.intentionalLeave = false;
     this.reconnecting = false;
+    music.play('match');
     this.attachRoomHandlers();
 
     this.events.once('shutdown', () => {
@@ -212,7 +215,7 @@ export class OnlineGameScene extends Phaser.Scene {
       const atk = localDef.attack;
       const wants = atk.kind === 'potion' ? input.attackReleased : input.attack;
       if (wants && this.shootCd <= 0 && atk.kind !== 'chain') {
-        sfx.play(atk.kind === 'potion' ? 'potion' : 'shoot');
+        sfx.play(attackSfx(localDef)); // son signature du Zarek joué
         this.shootCd = atk.reloadMs;
       }
     } else if (me) {
@@ -375,7 +378,10 @@ export class OnlineGameScene extends Phaser.Scene {
         const flash = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, COLORS.white, 0.32).setScrollFactor(0).setDepth(900);
         this.tweens.add({ targets: flash, alpha: 0, duration: 260, onComplete: () => flash.destroy() });
       } else if (f.k === 'ult') {
-        sfx.play('ult', { volume: this.sfxVol(f.x, f.y) });
+        // La couleur de l'événement identifie le Zarek (unique par personnage) :
+        // on joue donc son ultime SIGNATURE, sans rien changer au protocole.
+        const owner = zarekByFxColor(f.c);
+        sfx.play(owner ? ultSfx(owner) : 'ult', { volume: this.sfxVol(f.x, f.y) });
         const ring = this.add.circle(f.x, f.y, f.r ?? 100, f.c ?? 0xffffff, 0.12).setStrokeStyle(8, f.c ?? 0xffffff, 0.9).setDepth(25).setScale(0.15);
         this.tweens.add({ targets: ring, scale: 1, duration: 320, ease: 'Cubic.out' });
         this.tweens.add({ targets: ring, alpha: 0, duration: 440, ease: 'Quad.in', onComplete: () => ring.destroy() });
@@ -399,7 +405,8 @@ export class OnlineGameScene extends Phaser.Scene {
         const s = this.add.circle(f.x, f.y, 26, f.c ?? 0xffffff, 0.5).setStrokeStyle(4, f.c ?? 0xffffff, 1).setDepth(24).setScale(0.6);
         this.tweens.add({ targets: s, scale: 2.6, alpha: 0, duration: 440, ease: 'Cubic.out', onComplete: () => s.destroy() });
       } else if (f.k === 'bolt') {
-        sfx.play('bolt', { volume: this.sfxVol(f.x, f.y) });
+        const caster = zarekByFxColor(f.c);
+        sfx.play(caster?.attack.kind === 'chain' ? attackSfx(caster) : 'bolt', { volume: this.sfxVol(f.x, f.y) });
         drawChainBolt(this, f.x, f.y, f.x2 ?? f.x, f.y2 ?? f.y, f.c ?? 0xffffff);
       }
     }
@@ -418,7 +425,7 @@ export class OnlineGameScene extends Phaser.Scene {
     this.ultFill = this.add.rectangle(0, 0, 0, 11, COLORS.ultReady).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d);
     this.bigText = this.add.text(0, 0, '', { fontFamily: 'system-ui, sans-serif', fontSize: '52px', fontStyle: 'bold', color: '#ffffff', align: 'center' }).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
     this.quitText = makeQuitButton(this, () => this.leave());
-    this.muteBtn = makeMuteButton(this).setOrigin(1, 0);
+    this.settingsBtn = makeSettingsButton(this).setOrigin(1, 0);
     this.layoutHud();
     this.scale.on('resize', this.layoutHud, this);
   }
@@ -432,7 +439,7 @@ export class OnlineGameScene extends Phaser.Scene {
     this.scoreText.setPosition(w / 2, 12 + i.top);
     this.timerText.setPosition(w / 2, 50 + i.top);
     this.quitText.setPosition(20 + i.left, 16 + i.top);
-    this.muteBtn.setPosition(w - 20 - i.right, 16 + i.top);
+    this.settingsBtn.setPosition(w - 20 - i.right, 16 + i.top);
     const hx = 24 + i.left;
     const hy = h - 52 - i.bottom;
     (this.children.getByName('hpback') as Phaser.GameObjects.Rectangle)?.setPosition(hx, hy);

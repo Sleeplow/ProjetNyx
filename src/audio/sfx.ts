@@ -6,32 +6,23 @@
  * Points clés :
  * - L'AudioContext n'est créé (et « débloqué ») qu'au premier geste utilisateur,
  *   comme l'exigent les navigateurs (autoplay policy), via un écouteur global.
- * - Coupe-son persistant (`nyxt.muted` en localStorage) — voir makeMuteButton.
+ * - Deux bus séparés : effets et musique, chacun piloté par son propre réglage
+ *   de volume persistant (voir `config/settings.ts` et l'écran Configuration).
  * - Anti-spam : un même son ne rejoue pas avant un court délai (les tirs de
  *   8 combattants ne doivent pas devenir une bouillie saturée).
  * - `volumeAt(distance)` : atténuation spatiale simple pour les événements
  *   lointains (un tir à l'autre bout de la carte s'entend à peine).
  */
 
-export type SfxName =
-  | 'click' // tap sur un bouton d'interface
-  | 'shoot' // tir de base (projectiles)
-  | 'bolt' // éclair en chaîne
-  | 'potion' // lancer de potion
-  | 'splash' // flaque de potion qui s'étale
-  | 'hit' // impact sur un combattant
-  | 'kick' // frappe de la balle (Brawl Ball)
-  | 'ult' // ultime déclenché
-  | 'ultready' // jauge d'ultime pleine (joueur local)
-  | 'goal' // but marqué
-  | 'death' // élimination
-  | 'cube' // gemme de puissance ramassée
-  | 'countdown' // bip du compte à rebours « 3-2-1 »
-  | 'go' // top départ
-  | 'whistle' // coup de sifflet (engagement)
-  | 'victory' // fin de partie gagnée
-  | 'defeat' // fin de partie perdue
-  | 'teleport'; // passage de portail
+import type { SfxName } from './names';
+import { settings } from '../config/settings';
+
+export type { SfxName };
+
+/** Marge de sécurité des bus (avant application du volume choisi par le joueur). */
+const MASTER_HEADROOM = 0.5;
+/** La musique reste volontairement SOUS les effets : elle porte l'ambiance. */
+const MUSIC_HEADROOM = 0.35;
 
 interface PlayOpts {
   /** Volume relatif 0..1 (défaut 1). Multiplié par le volume propre du son. */
@@ -41,8 +32,11 @@ interface PlayOpts {
 /** Délai minimal entre deux lectures du même son (ms). */
 const THROTTLE_MS: Partial<Record<SfxName, number>> = {
   shoot: 70,
+  shoot_wave: 70,
+  shoot_heavy: 70,
   hit: 60,
   bolt: 90,
+  bolt_astrape: 90,
   death: 120,
   cube: 80,
 };
@@ -51,18 +45,16 @@ const THROTTLE_DEFAULT_MS = 45;
 class SfxEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  private musicGain: GainNode | null = null;
   private noiseBuf: AudioBuffer | null = null;
   private lastPlay = new Map<SfxName, number>();
-  private mutedFlag = false;
+  /** Abonnés au déblocage de l'audio (1er geste utilisateur) — voir onUnlock. */
+  private unlockListeners: (() => void)[] = [];
+  private unlocked = false;
 
   constructor() {
     // Environnement sans navigateur (tests vitest en Node) : moteur inerte.
     if (typeof window === 'undefined') return;
-    try {
-      this.mutedFlag = localStorage.getItem('nyxt.muted') === '1';
-    } catch {
-      /* localStorage indisponible (navigation privée stricte) : son actif */
-    }
     // Débloque l'audio au premier geste — indispensable sur iOS/Safari où un
     // contexte créé hors geste reste « suspended » pour toujours.
     const unlock = (): void => {
@@ -70,19 +62,37 @@ class SfxEngine {
     };
     window.addEventListener('pointerdown', unlock, { passive: true });
     window.addEventListener('keydown', unlock);
+    // Le volume des effets est un réglage joueur : appliqué au bus à chaud.
+    settings.onChange((s) => {
+      if (this.master) this.master.gain.value = MASTER_HEADROOM * s.sfxVolume;
+    });
   }
 
-  get muted(): boolean {
-    return this.mutedFlag;
+  /**
+   * S'abonne au déblocage de l'audio (premier geste utilisateur). La MUSIQUE
+   * s'en sert : une piste demandée avant le premier clic ne peut pas démarrer,
+   * elle est lancée ici dès que le contexte devient actif.
+   */
+  onUnlock(fn: () => void): void {
+    if (this.unlocked) fn();
+    else this.unlockListeners.push(fn);
   }
 
-  setMuted(m: boolean): void {
-    this.mutedFlag = m;
-    try {
-      localStorage.setItem('nyxt.muted', m ? '1' : '0');
-    } catch {
-      /* pas grave : le réglage ne survivra pas au rechargement */
-    }
+  /**
+   * Contexte audio partagé, prêt à l'emploi (créé au premier geste utilisateur).
+   * Exposé pour le moteur de MUSIQUE, qui doit programmer ses notes sur la même
+   * horloge et passer par le même bus — un second AudioContext serait refusé ou
+   * désynchronisé sur mobile.
+   */
+  audioContext(): AudioContext | null {
+    const ctx = this.ensureContext();
+    return ctx && ctx.state === 'running' ? ctx : null;
+  }
+
+  /** Bus dédié à la musique (volume propre, plus bas que les effets). */
+  musicBus(): GainNode | null {
+    this.ensureContext();
+    return this.musicGain;
   }
 
   /**
@@ -96,7 +106,7 @@ class SfxEngine {
 
   play(name: SfxName, opts?: PlayOpts): void {
     const vol = opts?.volume ?? 1;
-    if (this.mutedFlag || vol <= 0.02) return;
+    if (settings.get().sfxVolume <= 0 || vol <= 0.02) return;
     const ctx = this.ensureContext();
     if (!ctx || ctx.state !== 'running') return;
 
@@ -114,14 +124,27 @@ class SfxEngine {
     if (!this.ctx) {
       try {
         this.ctx = new AudioContext();
+        const s = settings.get();
+        // Marge anti-saturation quand tout tire en même temps, × réglage joueur.
         this.master = this.ctx.createGain();
-        this.master.gain.value = 0.5; // marge anti-saturation quand tout tire en même temps
+        this.master.gain.value = MASTER_HEADROOM * s.sfxVolume;
         this.master.connect(this.ctx.destination);
+        // Bus musique séparé : volontairement discret pour rester SOUS les
+        // effets — la musique porte l'ambiance, elle ne masque pas le gameplay.
+        this.musicGain = this.ctx.createGain();
+        this.musicGain.gain.value = MUSIC_HEADROOM * s.musicVolume;
+        this.musicGain.connect(this.ctx.destination);
       } catch {
         return null; // Web Audio indisponible : le jeu reste simplement muet
       }
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
+    if (this.ctx.state === 'running' && !this.unlocked) {
+      this.unlocked = true;
+      const pending = this.unlockListeners;
+      this.unlockListeners = [];
+      for (const fn of pending) fn();
+    }
     return this.ctx;
   }
 
@@ -259,6 +282,59 @@ class SfxEngine {
     teleport: (t, v) => {
       this.tone(t, { type: 'sine', from: 260, to: 1400, dur: 0.22, vol: 0.18 * v });
       this.tone(t, { type: 'triangle', from: 1400, to: 500, dur: 0.16, vol: 0.12 * v, delay: 0.2 });
+    },
+
+    // ----- Attaques signature (une voix par Zarek : on reconnaît qui tire) -----
+
+    /** Zephyr — « Ondes sonores » : bip synthétique clair qui descend, très « enceinte ». */
+    shoot_wave: (t, v) => {
+      const f = 1150 + Math.random() * 120;
+      this.tone(t, { type: 'sine', from: f, to: 420, dur: 0.13, vol: 0.16 * v });
+      this.tone(t, { type: 'triangle', from: f * 0.5, to: 260, dur: 0.11, vol: 0.1 * v });
+    },
+    /** Atlas — « Impact » : gros « thump » grave et mat, sans brillance. */
+    shoot_heavy: (t, v) => {
+      this.tone(t, { type: 'square', from: 220, to: 60, dur: 0.19, vol: 0.26 * v });
+      this.noise(t, { dur: 0.14, vol: 0.16 * v, from: 700, to: 130 });
+    },
+    /** Hécate — « Potion toxique » : glouglou de fiole qui monte (liquide). */
+    potion_hecate: (t, v) => {
+      this.tone(t, { type: 'sine', from: 240, to: 660, dur: 0.18, vol: 0.2 * v });
+      this.tone(t, { type: 'sine', from: 420, to: 900, dur: 0.1, vol: 0.1 * v, delay: 0.07 });
+      this.noise(t, { dur: 0.08, vol: 0.06 * v, filter: 'bandpass', from: 1500 });
+    },
+    /** Astrapé — « Éclair » : claquement sec et aigu (plus court que la chaîne générique). */
+    bolt_astrape: (t, v) => {
+      this.tone(t, { type: 'sawtooth', from: 2100, to: 220, dur: 0.13, vol: 0.19 * v });
+      this.noise(t, { dur: 0.1, vol: 0.15 * v, filter: 'highpass', from: 3600, to: 1400 });
+    },
+
+    // ----- Ultimes signature -----
+
+    /** Zephyr — « Break Dance » : balayage qui monte puis souffle de repoussée. */
+    ult_wave: (t, v) => {
+      this.tone(t, { type: 'sine', from: 180, to: 1500, dur: 0.34, vol: 0.24 * v });
+      this.noise(t, { dur: 0.5, vol: 0.22 * v, filter: 'bandpass', from: 600, to: 2800, delay: 0.28 });
+      this.tone(t, { type: 'triangle', from: 700, to: 120, dur: 0.4, vol: 0.18 * v, delay: 0.3 });
+    },
+    /** Atlas — « Séisme » : grondement très grave + gravats (le sol tremble). */
+    ult_quake: (t, v) => {
+      this.tone(t, { type: 'sine', from: 90, to: 34, dur: 0.85, vol: 0.42 * v });
+      this.tone(t, { type: 'square', from: 130, to: 45, dur: 0.5, vol: 0.16 * v });
+      this.noise(t, { dur: 0.8, vol: 0.24 * v, from: 420, to: 80 });
+    },
+    /** Hécate — « Aura de poison » : sifflement de gaz qui se répand + note trouble. */
+    ult_poison: (t, v) => {
+      this.noise(t, { dur: 0.9, vol: 0.2 * v, filter: 'bandpass', from: 2600, to: 500 });
+      this.tone(t, { type: 'sawtooth', from: 300, to: 150, dur: 0.7, vol: 0.13 * v });
+      this.tone(t, { type: 'sine', from: 155, to: 148, dur: 0.8, vol: 0.12 * v }); // battement dissonant
+    },
+    /** Astrapé — « Surcharge » : coup de tonnerre (craquement sec puis roulement). */
+    ult_thunder: (t, v) => {
+      this.noise(t, { dur: 0.12, vol: 0.34 * v, filter: 'highpass', from: 5000, to: 2000 });
+      this.tone(t, { type: 'sawtooth', from: 2600, to: 90, dur: 0.3, vol: 0.28 * v });
+      this.noise(t, { dur: 0.9, vol: 0.24 * v, from: 900, to: 90, delay: 0.1 });
+      this.tone(t, { type: 'sine', from: 70, to: 40, dur: 0.7, vol: 0.24 * v, delay: 0.12 });
     },
   };
 }

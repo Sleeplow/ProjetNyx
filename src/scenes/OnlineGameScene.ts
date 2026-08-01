@@ -10,7 +10,8 @@ import { ZAREKS, ZAREK_BY_ID } from '../zareks/registry';
 import type { ZarekDef, MapDef } from '../core/types';
 import { stepMovement } from '../shared/game/movement';
 import { clamp, dist } from '../core/geometry';
-import { makeButton, makeQuitButton, type Button } from '../ui/widgets';
+import { makeButton, makeMuteButton, makeQuitButton, type Button } from '../ui/widgets';
+import { sfx } from '../audio/sfx';
 import { safeInsets } from '../ui/layout';
 import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
@@ -66,6 +67,13 @@ export class OnlineGameScene extends Phaser.Scene {
   private camX = 0;
   private camY = 0;
 
+  // Sons : fronts montants détectés côté client (le serveur n'envoie pas d'événement dédié).
+  private prevPhase = '';
+  private lastCountdownSec = -1;
+  private prevCubes = 0;
+  private prevUltReady = false;
+  private shootCd = 0; // recharge locale approximative (le tir n'a pas d'événement fx)
+
   // HUD
   private scoreText!: Phaser.GameObjects.Text;
   private timerText!: Phaser.GameObjects.Text;
@@ -73,6 +81,7 @@ export class OnlineGameScene extends Phaser.Scene {
   private hpText!: Phaser.GameObjects.Text;
   private ultFill!: Phaser.GameObjects.Rectangle;
   private bigText!: Phaser.GameObjects.Text;
+  private muteBtn!: Phaser.GameObjects.Text;
 
   // Overlays (salle d'attente / résultat)
   private overlayPhase = '';
@@ -115,6 +124,11 @@ export class OnlineGameScene extends Phaser.Scene {
     this.avatars = new Map();
     this.spectateId = null;
     this.fxTime = 0;
+    this.prevPhase = '';
+    this.lastCountdownSec = -1;
+    this.prevCubes = 0;
+    this.prevUltReady = false;
+    this.shootCd = 0;
 
     const { width, height } = this.arena;
     this.cameras.main.setBounds(0, 0, width, height);
@@ -190,6 +204,17 @@ export class OnlineGameScene extends Phaser.Scene {
         this.predY = Phaser.Math.Linear(this.predY, me.y, k);
       }
       if (!this.reconnecting) this.room.send('input', input);
+
+      // Son de tir LOCAL (le serveur n'émet pas d'événement fx pour les tirs) :
+      // on rejoue la recharge côté client — approximatif mais immédiat. L'éclair
+      // en chaîne est exclu : son événement 'bolt' serveur porte déjà le son.
+      this.shootCd -= dtMs;
+      const atk = localDef.attack;
+      const wants = atk.kind === 'potion' ? input.attackReleased : input.attack;
+      if (wants && this.shootCd <= 0 && atk.kind !== 'chain') {
+        sfx.play(atk.kind === 'potion' ? 'potion' : 'shoot');
+        this.shootCd = atk.reloadMs;
+      }
     } else if (me) {
       this.predX = me.x;
       this.predY = me.y;
@@ -261,7 +286,8 @@ export class OnlineGameScene extends Phaser.Scene {
     this.camY = Phaser.Math.Linear(this.camY, fy, spec ? 0.14 : 0.12);
     this.cameras.main.centerOn(this.camX, this.camY);
 
-    // 5) HUD + overlays.
+    // 5) HUD + overlays (+ sons pilotés par l'état : phases, cube, ult prête).
+    this.playStateSounds(snap, me);
     this.controller.setUltReady(!!me && me.al && me.uc >= 100 && snap.phase === 'playing');
     this.updateHud(snap, me);
     if (snap.phase !== this.overlayPhase) {
@@ -294,9 +320,45 @@ export class OnlineGameScene extends Phaser.Scene {
     return this.add.container(PITCH_NYXT.centerX, PITCH_NYXT.centerY, [shadow, body, dot, s1, s2]).setDepth(14);
   }
 
+  /**
+   * Sons déduits de l'ÉTAT du snapshot (pas des événements fx) : compte à
+   * rebours « 3-2-1 » puis top départ, fin de partie, gemme ramassée et jauge
+   * d'ultime pleine du joueur local — détectés par front montant côté client.
+   */
+  private playStateSounds(snap: MatchSnapshot, me?: SnapPlayer): void {
+    if (snap.phase === 'countdown') {
+      const sec = Math.max(1, Math.ceil(snap.timer / 1000));
+      if (sec !== this.lastCountdownSec) sfx.play('countdown');
+      this.lastCountdownSec = sec;
+    } else {
+      this.lastCountdownSec = -1;
+    }
+    if (snap.phase !== this.prevPhase) {
+      if (snap.phase === 'playing' && this.prevPhase === 'countdown') sfx.play('go');
+      if (snap.phase === 'ended') {
+        const winner = snap.winner;
+        if (winner < 0) sfx.play('whistle');
+        else sfx.play(winner === (me?.t ?? -2) ? 'victory' : 'defeat');
+      }
+      this.prevPhase = snap.phase;
+    }
+    const cubes = me?.cb ?? 0;
+    if (cubes > this.prevCubes) sfx.play('cube');
+    this.prevCubes = cubes;
+    const ultReady = !!me && me.al && me.uc >= 100 && snap.phase === 'playing';
+    if (ultReady && !this.prevUltReady) sfx.play('ultready');
+    this.prevUltReady = ultReady;
+  }
+
+  /** Volume d'un son selon sa distance à ce qu'on regarde (caméra). */
+  private sfxVol(x: number, y: number): number {
+    return sfx.volumeAt(dist(x, y, this.camX, this.camY));
+  }
+
   private playFx(fx: FxEvent[]): void {
     for (const f of fx) {
       if (f.k === 'goal') {
+        sfx.play('goal');
         this.cameras.main.shake(260, 0.008);
         const gc = (f.t ?? 0) === 0 ? TEAM.colorA : TEAM.colorB;
         for (let i = 0; i < 3; i++) {
@@ -313,10 +375,12 @@ export class OnlineGameScene extends Phaser.Scene {
         const flash = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, COLORS.white, 0.32).setScrollFactor(0).setDepth(900);
         this.tweens.add({ targets: flash, alpha: 0, duration: 260, onComplete: () => flash.destroy() });
       } else if (f.k === 'ult') {
+        sfx.play('ult', { volume: this.sfxVol(f.x, f.y) });
         const ring = this.add.circle(f.x, f.y, f.r ?? 100, f.c ?? 0xffffff, 0.12).setStrokeStyle(8, f.c ?? 0xffffff, 0.9).setDepth(25).setScale(0.15);
         this.tweens.add({ targets: ring, scale: 1, duration: 320, ease: 'Cubic.out' });
         this.tweens.add({ targets: ring, alpha: 0, duration: 440, ease: 'Quad.in', onComplete: () => ring.destroy() });
       } else if (f.k === 'hit') {
+        sfx.play('hit', { volume: this.sfxVol(f.x, f.y) });
         const color = f.c ?? 0xffffff;
         const pop = this.add.circle(f.x, f.y, 10, COLORS.white, 0.95).setDepth(24);
         this.tweens.add({ targets: pop, scale: 2.2, alpha: 0, duration: 160, ease: 'Quad.out', onComplete: () => pop.destroy() });
@@ -327,12 +391,15 @@ export class OnlineGameScene extends Phaser.Scene {
           this.tweens.add({ targets: shard, x: f.x + Math.cos(ang) * d, y: f.y + Math.sin(ang) * d, scale: 0.2, alpha: 0, duration: 220, ease: 'Cubic.out', onComplete: () => shard.destroy() });
         }
       } else if (f.k === 'kick') {
+        sfx.play('kick', { volume: this.sfxVol(f.x, f.y) });
         const ring = this.add.circle(f.x, f.y, 26, COLORS.white, 0.1).setStrokeStyle(4, COLORS.white, 0.8).setDepth(23).setScale(0.4);
         this.tweens.add({ targets: ring, scale: 1.2, alpha: 0, duration: 260, ease: 'Cubic.out', onComplete: () => ring.destroy() });
       } else if (f.k === 'death') {
+        sfx.play('death', { volume: this.sfxVol(f.x, f.y) });
         const s = this.add.circle(f.x, f.y, 26, f.c ?? 0xffffff, 0.5).setStrokeStyle(4, f.c ?? 0xffffff, 1).setDepth(24).setScale(0.6);
         this.tweens.add({ targets: s, scale: 2.6, alpha: 0, duration: 440, ease: 'Cubic.out', onComplete: () => s.destroy() });
       } else if (f.k === 'bolt') {
+        sfx.play('bolt', { volume: this.sfxVol(f.x, f.y) });
         drawChainBolt(this, f.x, f.y, f.x2 ?? f.x, f.y2 ?? f.y, f.c ?? 0xffffff);
       }
     }
@@ -351,6 +418,7 @@ export class OnlineGameScene extends Phaser.Scene {
     this.ultFill = this.add.rectangle(0, 0, 0, 11, COLORS.ultReady).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d);
     this.bigText = this.add.text(0, 0, '', { fontFamily: 'system-ui, sans-serif', fontSize: '52px', fontStyle: 'bold', color: '#ffffff', align: 'center' }).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
     this.quitText = makeQuitButton(this, () => this.leave());
+    this.muteBtn = makeMuteButton(this).setOrigin(1, 0);
     this.layoutHud();
     this.scale.on('resize', this.layoutHud, this);
   }
@@ -364,6 +432,7 @@ export class OnlineGameScene extends Phaser.Scene {
     this.scoreText.setPosition(w / 2, 12 + i.top);
     this.timerText.setPosition(w / 2, 50 + i.top);
     this.quitText.setPosition(20 + i.left, 16 + i.top);
+    this.muteBtn.setPosition(w - 20 - i.right, 16 + i.top);
     const hx = 24 + i.left;
     const hy = h - 52 - i.bottom;
     (this.children.getByName('hpback') as Phaser.GameObjects.Rectangle)?.setPosition(hx, hy);

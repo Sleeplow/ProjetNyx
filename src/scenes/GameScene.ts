@@ -16,6 +16,7 @@ import { NeurotoxinField } from '../shared/game/neurotoxin';
 import { PortalSystem } from '../shared/game/portals';
 import { resolveChain } from '../shared/game/chain';
 import { drawChainBolt } from '../render/fx';
+import { sfx } from '../audio/sfx';
 import { ZAREKS, getZarek } from '../zareks/registry';
 import { ROCK_KEYS, BUSH_KEYS, LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider, isInBush } from '../render/props';
 import { COLORS, POWER_CUBE, PLAYERS_PER_MATCH, BUSH } from '../config/constants';
@@ -54,6 +55,8 @@ export class GameScene extends Phaser.Scene {
 
   private handledDead = new Set<string>();
   private ending = false;
+  /** Front montant de « jauge d'ultime pleine » du joueur (pour le carillon). */
+  private prevUltReady = false;
   private placement = PLAYERS_PER_MATCH;
   private selectedZarekId = ZAREKS[0].id;
   private modeId = 'battle-royale';
@@ -91,6 +94,7 @@ export class GameScene extends Phaser.Scene {
     this.neuro = undefined;
     this.portals = undefined;
     this.fxTime = 0;
+    this.prevUltReady = false;
 
     const { width, height } = this.map;
     this.cameras.main.setBounds(0, 0, width, height);
@@ -119,6 +123,7 @@ export class GameScene extends Phaser.Scene {
 
     if (this.isPortal) this.hud.setWarningText('☣ NEUROTOXINE');
     this.hud.flash(this.isPortal ? 'CHAMBRE NYXT — NEUROTOXINE !' : 'BATTLE ROYALE !', '#ffcf33');
+    sfx.play('go');
 
     this.events.once('shutdown', () => {
       this.playerController.destroy();
@@ -524,6 +529,7 @@ export class GameScene extends Phaser.Scene {
         if (cube.alive && dist(c.x, c.y, cube.x, cube.y) <= POWER_CUBE.pickupRadius + c.def.radius) {
           c.pickCube();
           cube.destroy();
+          sfx.play('cube', { volume: c.isPlayer ? 1 : this.sfxVol(cube.x, cube.y) * 0.6 });
         }
       }
     }
@@ -586,6 +592,9 @@ export class GameScene extends Phaser.Scene {
     if (this.isPortal) this.renderPortalFx();
 
     // 11) HUD.
+    const ultReady = this.player.ultReady && this.player.alive;
+    if (ultReady && !this.prevUltReady) sfx.play('ultready');
+    this.prevUltReady = ultReady;
     this.playerController.setUltReady(this.player.ultReady && this.player.alive);
     const survivors = this.combatants.filter((c) => c.alive).length;
     const danger = this.isPortal ? this.neuro!.isDanger(this.player.x, this.player.y) : this.mode.isOutside(this.player.x, this.player.y);
@@ -710,10 +719,12 @@ export class GameScene extends Phaser.Scene {
   private fireAttack(c: Combatant): void {
     const a = c.def.attack;
     if (a.kind === 'potion') {
+      sfx.play('potion', { volume: this.sfxVol(c.x, c.y) });
       this.throwPotion(c);
     } else if (a.kind === 'chain') {
       this.fireChain(c);
     } else {
+      sfx.play('shoot', { volume: this.sfxVol(c.x, c.y) });
       const spread = Phaser.Math.DegToRad(a.spreadDeg);
       const dmg = a.damage * c.damageMult;
       const muzzle = c.def.radius + 6;
@@ -733,6 +744,7 @@ export class GameScene extends Phaser.Scene {
 
   /** Éclair en chaîne : foudroie l'ennemi le plus proche puis rebondit (dégâts décroissants). */
   private fireChain(c: Combatant): void {
+    sfx.play('bolt', { volume: this.sfxVol(c.x, c.y) });
     const a = c.def.attack;
     const enemies = this.combatants.filter((o) => o !== c && o.alive);
     const idx = resolveChain(
@@ -832,6 +844,7 @@ export class GameScene extends Phaser.Scene {
   private spawnPotionPuddle(p: Projectile): void {
     const info = p.landsInto;
     if (!info) return;
+    sfx.play('splash', { volume: this.sfxVol(p.x, p.y) });
     this.hazards.push(
       new HazardZone(this, p.x, p.y, {
         radius: info.radius,
@@ -845,6 +858,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private fireUlt(c: Combatant): void {
+    sfx.play('ult', { volume: this.sfxVol(c.x, c.y) });
     const u = c.def.ultimate;
     if (u.kind === 'aura') {
       this.spawnPoisonAura(c);
@@ -983,6 +997,7 @@ export class GameScene extends Phaser.Scene {
     this.spectateBanner?.destroy();
     this.spectateBanner = undefined;
     this.hud.flash(victory ? 'VICTOIRE ROYALE !' : 'FIN DE LA PARTIE', victory ? '#ffcf33' : '#d8d8ff');
+    sfx.play(victory ? 'victory' : 'defeat');
     this.time.delayedCall(1500, () => {
       this.scene.start('GameOver', { victory, mode: 'battle-royale', modeId: this.modeId, placement: this.placement, zarekId: this.selectedZarekId });
     });
@@ -997,6 +1012,11 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- Effets visuels ----------
 
+  /** Volume d'un son selon sa distance à ce qu'on regarde (caméra). */
+  private sfxVol(x: number, y: number): number {
+    return sfx.volumeAt(dist(x, y, this.camX, this.camY));
+  }
+
   private shockwaveFx(x: number, y: number, radius: number, color: number): void {
     const ring = this.add.circle(x, y, radius, color, 0.12).setStrokeStyle(8, color, 0.9).setDepth(25).setScale(0.15);
     this.tweens.add({ targets: ring, scale: 1, duration: 320, ease: 'Cubic.out' });
@@ -1005,16 +1025,19 @@ export class GameScene extends Phaser.Scene {
 
   /** Éclat d'arrivée de portail : anneau clair qui s'ouvre à la sortie. */
   private teleportBurst(x: number, y: number): void {
+    sfx.play('teleport', { volume: this.sfxVol(x, y) });
     const ring = this.add.circle(x, y, 46, 0x9be8ff, 0.16).setStrokeStyle(5, 0xd6f6ff, 0.95).setDepth(19).setScale(0.4);
     this.tweens.add({ targets: ring, scale: 1.25, alpha: 0, duration: 380, ease: 'Cubic.out', onComplete: () => ring.destroy() });
   }
 
   private hitSpark(x: number, y: number, color: number): void {
+    sfx.play('hit', { volume: this.sfxVol(x, y) });
     const s = this.add.circle(x, y, 9, color, 0.9).setDepth(24);
     this.tweens.add({ targets: s, scale: 2, alpha: 0, duration: 180, onComplete: () => s.destroy() });
   }
 
   private deathBurst(x: number, y: number, color: number): void {
+    sfx.play('death', { volume: this.sfxVol(x, y) });
     const s = this.add.circle(x, y, 26, color, 0.5).setStrokeStyle(4, color, 1).setDepth(24).setScale(0.6);
     this.tweens.add({ targets: s, scale: 2.6, alpha: 0, duration: 440, ease: 'Cubic.out', onComplete: () => s.destroy() });
   }

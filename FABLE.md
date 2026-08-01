@@ -99,14 +99,21 @@ le code de salon devient le seul moyen d'entrer.
 sprites 3D bakés, cubes de puissance, buissons, leaderboard de session, Cover
 Flow, PWA. Ordre conseillé : **1 → 2 → 3 → 4**.
 
-### 🔊 Feature 1 — Sons & musique — ⏳ À faire
-**Petit effort, effet énorme.** Le jeu est **entièrement muet** — l'écart le plus
-flagrant avec Brawl Stars, dont la moitié du feel vient de l'audio.
-À ajouter : tirs / impacts / ult par Zarek, but + célébration, compte à rebours
-« 3-2-1 », ramassage de cube, victoire/défaite, musique de menu + de match.
-Sources CC0 : Kenney Audio, ou sons générés (jsfxr). Trivial avec Phaser
-(`this.sound.play`) ; les événements `fx` du snapshot (`hit`, `goal`, `ult`,
-`death`…) sont déjà le point d'accroche parfait côté en ligne.
+### 🔊 Feature 1 — Sons & musique — 🔧 Partiel (effets sonores ✅, musique ⏳)
+**Petit effort, effet énorme.** Le jeu était **entièrement muet**.
+✅ **Effets sonores livrés** : moteur `src/audio/sfx.ts` — sons **synthétisés en
+Web Audio** (style jsfxr, zéro fichier à télécharger, marche hors-ligne/PWA
+sans toucher au service worker). Couvre : tirs / éclair / potion+flaque,
+impacts, ultime + « jauge pleine », but (fanfare), frappe de balle, coup de
+sifflet, compte à rebours « 3-2-1 » + top départ, ramassage de gemme,
+élimination, téléportation (Portal), victoire/défaite, clics d'interface.
+Solo ET en ligne (les événements `fx` du snapshot — `hit`, `goal`, `ult`,
+`death`, `bolt`, `kick` — portent les sons ; le reste est détecté par front
+montant côté client). Atténuation par distance à la caméra + anti-spam.
+Bouton 🔊/🔇 (menus + HUD des 3 scènes de jeu), réglage persistant
+(`nyxt.muted`).
+⏳ **Reste : la musique** (menu + match) — boucle générée ou piste CC0
+(Kenney Audio).
 
 ### 🏆 Feature 2 — Trophées & déblocage des Zareks — ⏳ À faire
 **La boucle « encore une partie ».** Le socle existe déjà : `SelectScene` a des
@@ -273,7 +280,7 @@ gracieux + smoke test CI + garde-fou bundle (#35).
 |---|---|---|---|
 | Sécu | `nanoid` (Colyseus 0.16) | ⚪ Sans objet | non exploitable (ID taille fixe) ; bump 0.17 bloqué (pas de client compatible) |
 | Réseau | Durcir le handshake (refuser l'absence de `v`) | ⏳ 🖥️ | une fois les vieux clients prod expirés |
-| Feat 1 | Sons & musique | ⏳ | prochain — gros impact, petit effort |
+| Feat 1 | Sons & musique | 🔧 | effets sonores ✅ (Web Audio synthétisé) ; reste la musique |
 | Feat 2 | Trophées & déblocage Zareks | ⏳ | boucle de rétention |
 | Feat 3 | Gem Grab | ⏳ | mode emblématique |
 | Feat 4 | Duo Showdown | ⏳ | BR à deux |

@@ -11,6 +11,7 @@ import { PITCH_NYXT } from '../maps/pitchNyxt';
 import { drawCartoonPitch } from '../render/pitchRender';
 import { resolveChain } from '../shared/game/chain';
 import { drawChainBolt } from '../render/fx';
+import { sfx } from '../audio/sfx';
 import { ZAREKS, getZarek } from '../zareks/registry';
 import { COLORS } from '../config/constants';
 import { TEAM, BALL, SOCCER } from '../config/soccer';
@@ -50,6 +51,8 @@ export class SoccerScene extends Phaser.Scene {
   private sudden = false;
   private camX = 0;
   private camY = 0;
+  /** Front montant de « jauge d'ultime pleine » du joueur (pour le carillon). */
+  private prevUltReady = false;
 
   constructor() {
     super('Soccer');
@@ -68,6 +71,7 @@ export class SoccerScene extends Phaser.Scene {
     this.phaseTimer = SOCCER.kickoffFreezeMs;
     this.matchClockMs = SOCCER.matchMs;
     this.sudden = false;
+    this.prevUltReady = false;
 
     const { width, height } = this.pitch.map;
     this.cameras.main.setBounds(0, 0, width, height);
@@ -89,6 +93,7 @@ export class SoccerScene extends Phaser.Scene {
     this.cameras.main.setZoom(1);
 
     this.hud.flash('COUP D’ENVOI', '#ffcf33');
+    sfx.play('whistle');
 
     this.events.once('shutdown', () => {
       this.playerController.destroy();
@@ -175,6 +180,9 @@ export class SoccerScene extends Phaser.Scene {
     this.camY = Phaser.Math.Linear(this.camY, fy, 0.1);
     this.cameras.main.centerOn(this.camX, this.camY);
 
+    const ultReady = this.player.ultReady && this.player.alive;
+    if (ultReady && !this.prevUltReady) sfx.play('ultready');
+    this.prevUltReady = ultReady;
     this.playerController.setUltReady(this.player.ultReady && this.player.alive);
     this.hud.update(this.player, this.score, this.matchClockMs, this.sudden, this.respawning.get('player') ?? 0);
   }
@@ -198,6 +206,7 @@ export class SoccerScene extends Phaser.Scene {
     if (this.score[0] === this.score[1]) {
       this.sudden = true;
       this.hud.flash('MORT SUBITE !', '#ffcf33');
+      sfx.play('whistle');
     } else {
       this.endMatch(this.score[0] > this.score[1] ? 0 : 1);
     }
@@ -366,6 +375,7 @@ export class SoccerScene extends Phaser.Scene {
     this.ball.vy = 0;
     this.goalFx(this.ball.x, this.ball.y, team === 0 ? TEAM.colorA : TEAM.colorB);
     this.cameras.main.shake(260, 0.008);
+    sfx.play('goal');
 
     if (this.score[team] >= SOCCER.goalsToWin || this.sudden) {
       this.hud.flash(`BUT ${who} !`, color);
@@ -398,6 +408,7 @@ export class SoccerScene extends Phaser.Scene {
     this.ball.y = this.pitch.ballStart.y;
     this.phase = 'kickoff';
     this.phaseTimer = SOCCER.kickoffFreezeMs;
+    sfx.play('whistle');
   }
 
   private updateKickGuide(): void {
@@ -421,10 +432,12 @@ export class SoccerScene extends Phaser.Scene {
   private fireAttack(c: Combatant): void {
     const a = c.def.attack;
     if (a.kind === 'potion') {
+      sfx.play('potion', { volume: this.sfxVol(c.x, c.y) });
       this.throwPotion(c);
     } else if (a.kind === 'chain') {
       this.fireChain(c);
     } else {
+      sfx.play('shoot', { volume: this.sfxVol(c.x, c.y) });
       const spread = Phaser.Math.DegToRad(a.spreadDeg);
       const dmg = a.damage * c.damageMult;
       const muzzle = c.def.radius + 6;
@@ -445,6 +458,7 @@ export class SoccerScene extends Phaser.Scene {
 
   /** Éclair en chaîne : foudroie l'ennemi (autre équipe) le plus proche puis rebondit. */
   private fireChain(c: Combatant): void {
+    sfx.play('bolt', { volume: this.sfxVol(c.x, c.y) });
     const a = c.def.attack;
     const enemies = this.combatants.filter((o) => o.alive && o.team !== c.team);
     const idx = resolveChain(
@@ -589,6 +603,7 @@ export class SoccerScene extends Phaser.Scene {
   private spawnPotionPuddle(p: Projectile): void {
     const info = p.landsInto;
     if (!info) return;
+    sfx.play('splash', { volume: this.sfxVol(p.x, p.y) });
     this.hazards.push(
       new HazardZone(this, p.x, p.y, { radius: info.radius, ownerId: p.ownerId, durationMs: info.durationMs, color: COLORS.poison, dps: info.dps, chargesUlt: true }),
     );
@@ -623,6 +638,7 @@ export class SoccerScene extends Phaser.Scene {
   }
 
   private fireUlt(c: Combatant): void {
+    sfx.play('ult', { volume: this.sfxVol(c.x, c.y) });
     const u = c.def.ultimate;
     if (u.kind === 'aura') {
       this.shockwaveFx(c.x, c.y, u.radius, COLORS.poison);
@@ -676,6 +692,7 @@ export class SoccerScene extends Phaser.Scene {
     this.phase = 'ended';
     const victory = winnerTeam === 0;
     this.hud.flash(victory ? 'VICTOIRE !' : 'DÉFAITE', victory ? '#ffcf33' : '#ff6b5e');
+    sfx.play(victory ? 'victory' : 'defeat');
     this.time.delayedCall(1700, () => {
       this.scene.start('GameOver', {
         victory,
@@ -696,7 +713,13 @@ export class SoccerScene extends Phaser.Scene {
 
   // ---------- Effets visuels ----------
 
+  /** Volume d'un son selon sa distance à ce qu'on regarde (caméra). */
+  private sfxVol(x: number, y: number): number {
+    return sfx.volumeAt(dist(x, y, this.camX, this.camY));
+  }
+
   private kickFx(x: number, y: number): void {
+    sfx.play('kick', { volume: this.sfxVol(x, y) });
     const ring = this.add.circle(x, y, 30, COLORS.white, 0.1).setStrokeStyle(4, COLORS.white, 0.8).setDepth(23).setScale(0.4);
     this.tweens.add({ targets: ring, scale: 1.2, alpha: 0, duration: 260, ease: 'Cubic.out', onComplete: () => ring.destroy() });
   }
@@ -744,6 +767,7 @@ export class SoccerScene extends Phaser.Scene {
 
   /** Gerbe d'impact : un « pop » central + quelques éclats qui giclent. */
   private hitSpark(x: number, y: number, color: number): void {
+    sfx.play('hit', { volume: this.sfxVol(x, y) });
     const pop = this.add.circle(x, y, 10, COLORS.white, 0.95).setDepth(24);
     this.tweens.add({ targets: pop, scale: 2.2, alpha: 0, duration: 160, ease: 'Quad.out', onComplete: () => pop.destroy() });
     for (let i = 0; i < 6; i++) {
@@ -764,6 +788,7 @@ export class SoccerScene extends Phaser.Scene {
   }
 
   private deathBurst(x: number, y: number, color: number): void {
+    sfx.play('death', { volume: this.sfxVol(x, y) });
     const s = this.add.circle(x, y, 26, color, 0.5).setStrokeStyle(4, color, 1).setDepth(24).setScale(0.6);
     this.tweens.add({ targets: s, scale: 2.6, alpha: 0, duration: 440, ease: 'Cubic.out', onComplete: () => s.destroy() });
   }

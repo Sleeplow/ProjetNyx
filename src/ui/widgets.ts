@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { sfx } from '../audio/sfx';
 
 export interface Button {
   container: Phaser.GameObjects.Container;
@@ -60,6 +61,7 @@ export function makeButton(
     if (!armed) return;
     armed = false;
     hover();
+    sfx.play('click');
     onClick();
   });
   zone.on('pointerupoutside', () => {
@@ -122,6 +124,25 @@ export function makeQuitButton(scene: Phaser.Scene, onConfirm: () => void): Phas
     .setDepth(1005)
     .setInteractive({ useHandCursor: true })
     .on('pointerup', confirm);
+}
+
+/**
+ * Bouton coupe-son 🔊/🔇 (texte, `scrollFactor` 0). Le réglage persiste entre
+ * les sessions (localStorage) — voir le moteur `sfx`. Le caller le positionne.
+ */
+export function makeMuteButton(scene: Phaser.Scene): Phaser.GameObjects.Text {
+  const label = (): string => (sfx.muted ? '🔇' : '🔊');
+  const t = scene.add
+    .text(0, 0, label(), { fontFamily: 'system-ui, sans-serif', fontSize: '22px' })
+    .setScrollFactor(0)
+    .setDepth(1005)
+    .setInteractive({ useHandCursor: true });
+  t.on('pointerup', () => {
+    sfx.setMuted(!sfx.muted);
+    t.setText(label());
+    sfx.play('click'); // silencieux si on vient de couper — confirme la réactivation
+  });
+  return t;
 }
 
 /**

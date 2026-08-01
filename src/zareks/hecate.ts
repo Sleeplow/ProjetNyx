@@ -47,6 +47,8 @@ export const HECATE: ZarekDef = {
     poisonDps: 130,
   },
   ultChargePerDamage: 0.06,
+  // Voix : glouglou de fiole ; sifflement de gaz pour l'aura.
+  sound: { attack: 'potion_hecate', ult: 'ult_poison' },
   sprite: {
     dirs: 8,
     yawOffsetDeg: 90,

@@ -24864,6 +24864,8 @@ var ZEPHYR = {
     slowFactor: 1
   },
   ultChargePerDamage: 0.06,
+  // Voix : bips d'enceinte pour les ondes, balayage + souffle pour le break dance.
+  sound: { attack: "shoot_wave", ult: "ult_wave" },
   sprite: {
     dirs: 8,
     yawOffsetDeg: 90,
@@ -24908,6 +24910,8 @@ var ATLAS = {
     slowFactor: 0.4
   },
   ultChargePerDamage: 0.05,
+  // Voix : frappes graves et mates ; grondement de séisme pour l'ultime.
+  sound: { attack: "shoot_heavy", ult: "ult_quake" },
   sprite: {
     dirs: 8,
     yawOffsetDeg: 90,
@@ -24959,6 +24963,8 @@ var HECATE = {
     poisonDps: 130
   },
   ultChargePerDamage: 0.06,
+  // Voix : glouglou de fiole ; sifflement de gaz pour l'aura.
+  sound: { attack: "potion_hecate", ult: "ult_poison" },
   sprite: {
     dirs: 8,
     yawOffsetDeg: 90,
@@ -25016,6 +25022,8 @@ var ASTRAPE = {
   },
   // Charge d'ult au rythme normal (comme les autres mages).
   ultChargePerDamage: 0.06,
+  // Voix : claquement d'éclair sec ; vrai coup de tonnerre pour la Surcharge.
+  sound: { attack: "bolt_astrape", ult: "ult_thunder" },
   sprite: {
     dirs: 8,
     yawOffsetDeg: 90,

@@ -41,6 +41,8 @@ export const ATLAS: ZarekDef = {
     slowFactor: 0.4,
   },
   ultChargePerDamage: 0.05,
+  // Voix : frappes graves et mates ; grondement de séisme pour l'ultime.
+  sound: { attack: 'shoot_heavy', ult: 'ult_quake' },
   sprite: {
     dirs: 8,
     yawOffsetDeg: 90, // calibré in-game : 0°(droite)→face captée à tort ; décalé pour que bas=face, haut=dos

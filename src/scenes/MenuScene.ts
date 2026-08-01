@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { makeButton, makeMuteButton, nightBackground } from '../ui/widgets';
+import { makeButton, nightBackground } from '../ui/widgets';
 import { computeFrame, watchResize, type Frame } from '../ui/layout';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { ZAREKS } from '../zareks/registry';
@@ -84,7 +84,6 @@ export class MenuScene extends Phaser.Scene {
     this.tweens.add({ targets: hint, alpha: 1, duration: 600, delay: 1000 });
 
     this.buildVersionTag(w, h, F);
-    makeMuteButton(this).setOrigin(1, 0).setPosition(w - F.insets.right - 14, F.insets.top + 12);
 
     watchResize(this, () => this.scene.restart());
   }

@@ -9,6 +9,7 @@ import { SoccerScene } from './scenes/SoccerScene';
 import { OnlineMenuScene } from './scenes/OnlineMenuScene';
 import { OnlineGameScene } from './scenes/OnlineGameScene';
 import { GameOverScene } from './scenes/GameOverScene';
+import { SettingsScene } from './scenes/SettingsScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -25,7 +26,9 @@ const config: Phaser.Types.Core.GameConfig = {
     antialias: true,
     roundPixels: false,
   },
-  scene: [BootScene, MenuScene, ModeSelectScene, SelectScene, GameScene, SoccerScene, OnlineMenuScene, OnlineGameScene, GameOverScene],
+  // SettingsScene est en dernier : lancée en SURIMPRESSION (`scene.launch`),
+  // elle doit se dessiner au-dessus de la scène qui l'ouvre.
+  scene: [BootScene, MenuScene, ModeSelectScene, SelectScene, GameScene, SoccerScene, OnlineMenuScene, OnlineGameScene, GameOverScene, SettingsScene],
 };
 
 const game = new Phaser.Game(config);

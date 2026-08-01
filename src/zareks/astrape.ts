@@ -47,6 +47,8 @@ export const ASTRAPE: ZarekDef = {
   },
   // Charge d'ult au rythme normal (comme les autres mages).
   ultChargePerDamage: 0.06,
+  // Voix : claquement d'éclair sec ; vrai coup de tonnerre pour la Surcharge.
+  sound: { attack: 'bolt_astrape', ult: 'ult_thunder' },
   sprite: {
     dirs: 8,
     yawOffsetDeg: 90,

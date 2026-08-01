@@ -99,7 +99,7 @@ le code de salon devient le seul moyen d'entrer.
 sprites 3D bakés, cubes de puissance, buissons, leaderboard de session, Cover
 Flow, PWA. Ordre conseillé : **1 → 2 → 3 → 4**.
 
-### 🔊 Feature 1 — Sons & musique — 🔧 Partiel (effets sonores ✅, musique ⏳)
+### 🔊 Feature 1 — Sons & musique — ✅ Fait
 **Petit effort, effet énorme.** Le jeu était **entièrement muet**.
 ✅ **Effets sonores livrés** : moteur `src/audio/sfx.ts` — sons **synthétisés en
 Web Audio** (style jsfxr, zéro fichier à télécharger, marche hors-ligne/PWA
@@ -110,10 +110,22 @@ sifflet, compte à rebours « 3-2-1 » + top départ, ramassage de gemme,
 Solo ET en ligne (les événements `fx` du snapshot — `hit`, `goal`, `ult`,
 `death`, `bolt`, `kick` — portent les sons ; le reste est détecté par front
 montant côté client). Atténuation par distance à la caméra + anti-spam.
-Bouton 🔊/🔇 (menus + HUD des 3 scènes de jeu), réglage persistant
-(`nyxt.muted`).
-⏳ **Reste : la musique** (menu + match) — boucle générée ou piste CC0
-(Kenney Audio).
+✅ **Sons SIGNATURE par Zarek** (2ᵉ passe) : chacun a sa voix, on reconnaît à
+l'oreille qui attaque — Zephyr bips d'enceinte / balayage, Atlas frappes graves /
+séisme, Hécate glouglou de fiole / sifflement de gaz, Astrapé claquement /
+tonnerre. Déclarés en données (`ZarekDef.sound`), avec repli générique : ajouter
+un Zarek sans ce champ reste valide. En ligne, la couleur portée par les
+événements `fx` identifie le Zarek → bon son **sans toucher au protocole**.
+✅ **Musique** (`src/audio/music.ts`) : deux boucles **générées** (séquenceur
+Web Audio programmé sur l'horloge audio, tempo stable) — `menu` (lent, nappe +
+arpège) et `match` (basse pulsée + batterie + riff), en La mineur. Fondu à la
+bascule. Toujours zéro fichier.
+✅ **Écran de Configuration** (`SettingsScene`) : volumes **séparés** musique /
+effets, en surimpression (⚙ depuis les menus ET en pleine partie — la partie
+**solo se met en pause**, impossible en ligne). Aperçu sonore en glissant le
+curseur, bouton « Par défaut ». Réglages persistés (`nyxt.settings`, migration
+de l'ancien `nyxt.muted`). **Socle des futurs paramètres** : un réglage = un
+champ dans `Settings` + une ligne dans `ROWS`.
 
 ### 🏆 Feature 2 — Trophées & déblocage des Zareks — ⏳ À faire
 **La boucle « encore une partie ».** Le socle existe déjà : `SelectScene` a des
@@ -280,8 +292,8 @@ gracieux + smoke test CI + garde-fou bundle (#35).
 |---|---|---|---|
 | Sécu | `nanoid` (Colyseus 0.16) | ⚪ Sans objet | non exploitable (ID taille fixe) ; bump 0.17 bloqué (pas de client compatible) |
 | Réseau | Durcir le handshake (refuser l'absence de `v`) | ⏳ 🖥️ | une fois les vieux clients prod expirés |
-| Feat 1 | Sons & musique | 🔧 | effets sonores ✅ (Web Audio synthétisé) ; reste la musique |
-| Feat 2 | Trophées & déblocage Zareks | ⏳ | boucle de rétention |
+| Feat 1 | Sons & musique | ✅ | SFX + sons signature par Zarek + musique + écran de config |
+| Feat 2 | Trophées & déblocage Zareks | ⏳ | **prochain** — boucle de rétention |
 | Feat 3 | Gem Grab | ⏳ | mode emblématique |
 | Feat 4 | Duo Showdown | ⏳ | BR à deux |
 

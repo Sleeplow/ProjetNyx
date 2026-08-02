@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { COLORS } from '../config/constants';
 
 /**
  * Roches d'Atlas : le projectile n'est plus une bille ronde mais un CAILLOU
@@ -9,6 +10,14 @@ import Phaser from 'phaser';
  */
 
 const TAU = Math.PI * 2;
+
+/**
+ * Couleur de la pierre — LA MÊME que la poussière qu'elle laisse (`COLORS.dust`) :
+ * le caillou et son nuage se lisent comme une seule matière. Une seule source,
+ * donc aucun risque de les voir diverger. Le liseré sombre et la facette claire
+ * suffisent à distinguer la roche pleine du voile translucide.
+ */
+export const ROCK_COLOR = COLORS.dust;
 
 /** Sommets d'une roche : peu nombreux et irréguliers → silhouette anguleuse. */
 const ROCK_FACETS = 9;
@@ -64,9 +73,9 @@ export class RockVisual {
   private readonly spin: number;
   private angle = 0;
 
-  constructor(scene: Phaser.Scene, x: number, y: number, radius: number, color: number, seed: number, depth = 18) {
+  constructor(scene: Phaser.Scene, x: number, y: number, radius: number, seed: number, depth = 18) {
     this.g = scene.add.graphics().setDepth(depth);
-    paintRock(this.g, rockPoints(seed, radius), color, radius);
+    paintRock(this.g, rockPoints(seed, radius), ROCK_COLOR, radius);
     this.g.setPosition(x, y);
     // Sens et vitesse de rotation tirés de la graine : une salve de deux roches
     // ne tourne pas comme un seul bloc.
@@ -88,13 +97,13 @@ export class RockVisual {
  * Éclatement d'une roche : des éclats anguleux partent dans toutes les
  * directions en tournant, plus une bouffée de poussière immédiate.
  */
-export function rockShatter(scene: Phaser.Scene, x: number, y: number, radius: number, color: number, depth = 24): void {
-  const dark = mix(color, 0x1a1208, 0.4);
+export function rockShatter(scene: Phaser.Scene, x: number, y: number, radius: number, depth = 24): void {
+  const dark = mix(ROCK_COLOR, 0x1a1208, 0.4);
   for (let i = 0; i < 7; i++) {
     const seed = i * 3 + Math.floor(x);
     const fr = radius * (0.2 + Math.random() * 0.22);
     const g = scene.add.graphics().setDepth(depth);
-    paintRock(g, rockPoints(seed, fr), i % 3 === 0 ? dark : color, fr);
+    paintRock(g, rockPoints(seed, fr), i % 3 === 0 ? dark : ROCK_COLOR, fr);
     g.setPosition(x, y);
     const ang = (i / 7) * TAU + Math.random() * 0.8;
     const d = radius * (1.6 + Math.random() * 1.8);

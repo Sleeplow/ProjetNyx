@@ -59,7 +59,7 @@ export class Projectile {
     if (rock) {
       // Graine tirée de la position de départ : deux roches d'une même salve
       // partent de points différents → formes différentes.
-      this.rock = new RockVisual(scene, x, y, radius, color, Math.abs(Math.round(x * 7 + y * 13)) % 97);
+      this.rock = new RockVisual(scene, x, y, radius, Math.abs(Math.round(x * 7 + y * 13)) % 97);
     } else {
       this.sprite = scene.add.circle(x, y, radius, color).setStrokeStyle(2, 0xffffff, 0.7).setDepth(18);
     }

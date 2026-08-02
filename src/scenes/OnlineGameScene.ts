@@ -19,7 +19,7 @@ import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { createPowerGemVisual } from '../core/PowerCube';
 import { PuddleVisual, PUDDLE_DEPTH } from '../render/puddle';
-import { DustVisual, rockPoints, rockShatter } from '../render/rocks';
+import { DustVisual, rockPoints, rockShatter, ROCK_COLOR } from '../render/rocks';
 import { BushField } from '../render/bushes';
 import { LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider } from '../render/props';
 import { drawCartoonPitch } from '../render/pitchRender';
@@ -28,9 +28,6 @@ import type { MatchSnapshot, SnapPlayer, FxEvent } from '../shared/game/snapshot
 
 const TAU = Math.PI * 2;
 
-/** Couleur des éclats de roche : celle du Zarek qui en tire (Atlas). Déduite du
- * registre, donc juste même si un autre Zarek reprend l'archétype plus tard. */
-const ROCK_COLOR = ZAREKS.find((z) => (z.attack.dustRadius ?? 0) > 0)?.color ?? COLORS.dust;
 
 interface Avatar {
   vis: AvatarVisual;
@@ -397,7 +394,7 @@ export class OnlineGameScene extends Phaser.Scene {
       g.translateCanvas(p.x, p.y);
       g.rotateCanvas(track.angle);
       const pts = rockPoints(track.seed, p.r);
-      g.fillStyle(p.c, 1);
+      g.fillStyle(ROCK_COLOR, 1);
       g.fillPoints(pts, true);
       g.lineStyle(Math.max(1.5, p.r * 0.16), 0x3a2a16, 1);
       g.strokePoints(pts, true, true);
@@ -463,7 +460,7 @@ export class OnlineGameScene extends Phaser.Scene {
         // Signature « roche éclatée » : le serveur envoie un `hit` couleur
         // poussière à l'endroit où la roche s'est brisée.
         sfx.play('rock_break', { volume: this.sfxVol(f.x, f.y) });
-        rockShatter(this, f.x, f.y, 15, ROCK_COLOR);
+        rockShatter(this, f.x, f.y, 15);
       } else if (f.k === 'hit') {
         sfx.play('hit', { volume: this.sfxVol(f.x, f.y) });
         const color = f.c ?? 0xffffff;

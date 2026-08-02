@@ -860,7 +860,7 @@ export class GameScene extends Phaser.Scene {
   private shatterIntoDust(p: Projectile): void {
     const d = p.leavesDust!;
     sfx.play('rock_break', { volume: this.sfxVol(p.x, p.y) });
-    rockShatter(this, p.x, p.y, p.radius, p.color);
+    rockShatter(this, p.x, p.y, p.radius);
     this.hazards.push(
       new HazardZone(this, p.x, p.y, {
         radius: d.radius,

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { PuddleVisual, PUDDLE_DEPTH } from '../render/puddle';
+import { DustVisual } from '../render/rocks';
 
 export interface HazardOptions {
   radius: number;
@@ -16,6 +17,8 @@ export interface HazardOptions {
   poisonDps?: number;
   /** Les dégâts directs chargent-ils l'ult du propriétaire ? (potion oui, aura non) */
   chargesUlt?: boolean;
+  /** Apparence : flaque visqueuse (poison) ou voile de poussière (roche d'Atlas). */
+  look?: 'puddle' | 'dust';
 }
 
 /**
@@ -37,7 +40,7 @@ export class HazardZone {
   remainingMs: number;
   alive = true;
 
-  private readonly vis: PuddleVisual;
+  private readonly vis: PuddleVisual | DustVisual;
 
   constructor(scene: Phaser.Scene, x: number, y: number, opts: HazardOptions) {
     this.x = x;
@@ -52,10 +55,13 @@ export class HazardZone {
     this.chargesUlt = opts.chargesUlt ?? false;
     this.remainingMs = opts.durationMs;
 
-    // Flaque organique (contour irrégulier + bulles visqueuses), pas un rond.
-    // Profondeur SOUS le décor (buissons 8, rochers/caisses 9) : le poison est
-    // au SOL, une roche plantée dedans doit le masquer là où elle est posée.
-    this.vis = new PuddleVisual(scene, x, y, { radius: opts.radius, color: opts.color, depth: PUDDLE_DEPTH });
+    // Profondeur SOUS le décor (buissons 8, rochers/caisses 9) : ces zones sont
+    // au SOL, une roche plantée dedans doit les masquer là où elle est posée.
+    this.vis =
+      opts.look === 'dust'
+        ? new DustVisual(scene, x, y, opts.radius, opts.color, PUDDLE_DEPTH)
+        : // Flaque organique (contour irrégulier + bulles visqueuses), pas un rond.
+          new PuddleVisual(scene, x, y, { radius: opts.radius, color: opts.color, depth: PUDDLE_DEPTH });
   }
 
   update(dtMs: number): void {
@@ -64,9 +70,11 @@ export class HazardZone {
       this.alive = false;
       return;
     }
-    // Rétrécissement sur la dernière demi-seconde pour signaler la dissipation.
+    // Dernière demi-seconde : la flaque rétrécit, la poussière se dissipe.
     if (this.remainingMs < 500) {
-      this.vis.setScale(Math.max(0.1, this.remainingMs / 500));
+      const k = Math.max(0, this.remainingMs / 500);
+      if (this.vis instanceof DustVisual) this.vis.setFade(k);
+      else this.vis.setScale(Math.max(0.1, k));
     }
     this.vis.update(dtMs);
   }

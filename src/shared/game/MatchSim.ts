@@ -180,6 +180,8 @@ class SimProjectile {
   distanceLeft: number;
   alive = true;
   landsInto: { radius: number; durationMs: number; dps: number } | null = null;
+  /** Roche (Atlas) : éclate à l'impact et laisse un nuage ralentissant. */
+  leavesDust: { radius: number; durationMs: number; slowFactor: number; slowMs: number } | null = null;
   constructor(
     public ownerId: string,
     public x: number,
@@ -1101,12 +1103,18 @@ export class MatchSim {
       const spread = (a.spreadDeg * Math.PI) / 180;
       const dmg = a.damage * c.damageMult;
       const muzzle = c.def.radius + 6;
+      // Une attaque qui déclare un nuage de poussière tire des ROCHES.
+      const isRock = (a.dustRadius ?? 0) > 0;
       for (let i = 0; i < a.count; i++) {
         const t = a.count === 1 ? 0 : i / (a.count - 1) - 0.5;
         const ang = c.aimAngle + t * spread;
         const dx = Math.cos(ang);
         const dy = Math.sin(ang);
-        this.projectiles.push(new SimProjectile(c.id, c.x + dx * muzzle, c.y + dy * muzzle, dx * a.speed, dy * a.speed, dmg, a.projRadius, a.range, c.def.color));
+        const p = new SimProjectile(c.id, c.x + dx * muzzle, c.y + dy * muzzle, dx * a.speed, dy * a.speed, dmg, a.projRadius, a.range, c.def.color);
+        if (isRock) {
+          p.leavesDust = { radius: a.dustRadius!, durationMs: a.dustMs ?? 1500, slowFactor: a.dustSlowFactor ?? 0.85, slowMs: a.dustSlowMs ?? 400 };
+        }
+        this.projectiles.push(p);
       }
     }
     c.reloadTimer = a.reloadMs;
@@ -1221,7 +1229,20 @@ export class MatchSim {
         }
       }
     }
+    for (const p of this.projectiles) if (!p.alive && p.leavesDust) this.spawnDust(p);
     this.projectiles = this.projectiles.filter((p) => p.alive);
+  }
+
+  /** Nuage de poussière d'une roche éclatée : ralentit légèrement, aucun dégât.
+   * Sa COULEUR (`COLORS.dust`) sert de signature au client pour le dessiner en
+   * voile plutôt qu'en flaque — pas besoin d'étendre le format du snapshot. */
+  private spawnDust(p: SimProjectile): void {
+    const d = p.leavesDust!;
+    const h = new SimHazard(p.x, p.y, d.radius, p.ownerId, d.durationMs, 0, COLORS.dust);
+    h.slowFactor = d.slowFactor;
+    h.slowMs = d.slowMs;
+    this.hazards.push(h);
+    this.fx.push({ k: 'hit', x: p.x, y: p.y, c: COLORS.dust });
   }
 
   private spawnPuddle(p: SimProjectile): void {

@@ -13,6 +13,10 @@ export const COLORS = {
   zoneDanger: 0x4a1d7a,
   powerCube: 0x66e0ff,
   poison: 0x86e05a,
+  /** Poussière de roche éclatée (Atlas) — sert AUSSI de signature du nuage dans
+   * le snapshot réseau : le client reconnaît la zone à sa couleur, sans avoir à
+   * étendre le protocole. */
+  dust: 0xb2a08b,
   playerAccent: 0xffe066,
   healthGood: 0x46d160,
   healthLow: 0xe0473a,

@@ -4,8 +4,9 @@ import type { ZarekDef } from '../core/types';
  * Atlas — deuxième Zarek, archétype TANK.
  *
  * Beaucoup de PV, lent, mais frappe fort à courte portée.
- * Attaque de base : « Impact » — une salve de projectiles lourds et larges,
- * puissante mais de courte portée.
+ * Attaque de base : « Impact » — une salve de ROCHES lourdes et larges,
+ * puissante mais de courte portée. Chaque roche éclate au contact et laisse un
+ * nuage de poussière qui ralentit légèrement.
  * Ultimate : « Séisme » — Atlas frappe le sol : onde de choc qui inflige de
  * gros dégâts et RALENTIT fortement les ennemis proches SANS les repousser —
  * il les garde ainsi collés à sa courte portée pour les marteler (synergie tank).
@@ -30,6 +31,13 @@ export const ATLAS: ZarekDef = {
     range: 240,
     speed: 480,
     projRadius: 15,
+    // Les roches éclatent au contact et laissent un voile de poussière : un
+    // ralentissement LÉGER et bref, juste de quoi coller un fuyard. Le vrai
+    // freinage reste l'ultime (0.4 pendant 3 s) — d'où l'écart volontaire.
+    dustRadius: 64,
+    dustMs: 1500,
+    dustSlowFactor: 0.82,
+    dustSlowMs: 420,
   },
   ultimate: {
     kind: 'shockwave',

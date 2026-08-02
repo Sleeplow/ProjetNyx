@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { PuddleVisual } from '../render/puddle';
 
 export interface HazardOptions {
   radius: number;
@@ -36,7 +37,7 @@ export class HazardZone {
   remainingMs: number;
   alive = true;
 
-  private readonly sprite: Phaser.GameObjects.Arc;
+  private readonly vis: PuddleVisual;
 
   constructor(scene: Phaser.Scene, x: number, y: number, opts: HazardOptions) {
     this.x = x;
@@ -51,16 +52,8 @@ export class HazardZone {
     this.chargesUlt = opts.chargesUlt ?? false;
     this.remainingMs = opts.durationMs;
 
-    this.sprite = scene.add.circle(x, y, opts.radius, opts.color, 0.24).setStrokeStyle(3, opts.color, 0.75).setDepth(11);
-    // Pulsation « toxique » douce.
-    scene.tweens.add({
-      targets: this.sprite,
-      alpha: 0.6,
-      duration: 620,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.inOut',
-    });
+    // Flaque organique (contour irrégulier + bulles visqueuses), pas un rond.
+    this.vis = new PuddleVisual(scene, x, y, { radius: opts.radius, color: opts.color, depth: 11 });
   }
 
   update(dtMs: number): void {
@@ -71,8 +64,9 @@ export class HazardZone {
     }
     // Rétrécissement sur la dernière demi-seconde pour signaler la dissipation.
     if (this.remainingMs < 500) {
-      this.sprite.setScale(Math.max(0.1, this.remainingMs / 500));
+      this.vis.setScale(Math.max(0.1, this.remainingMs / 500));
     }
+    this.vis.update(dtMs);
   }
 
   contains(px: number, py: number, pr: number): boolean {
@@ -81,6 +75,6 @@ export class HazardZone {
 
   destroy(): void {
     this.alive = false;
-    this.sprite.destroy();
+    this.vis.destroy();
   }
 }

@@ -25031,8 +25031,20 @@ var ASTRAPE = {
     chainFalloff: 0.75
     // −25 % par cible touchée
   },
-  // Charge d'ult au rythme normal (comme les autres mages).
-  ultChargePerDamage: 0.06,
+  /**
+   * Charge d'ult calibrée sur le TEMPS, pas sur le coefficient.
+   *
+   * Le coefficient s'applique aux dégâts infligés : à 0.06 comme les autres,
+   * Astrapé mettait ~10 s à remplir sa jauge, contre ~2,5 s pour Zephyr et
+   * ~3,3 s pour Atlas — non pas parce qu'elle chargeait « moins vite », mais
+   * parce que son attaque ne touche QU'UNE cible sans rebond (~165 dégâts/s
+   * contre ~610-655 pour eux). Le coefficient est justement là pour compenser
+   * un profil de dégâts atypique.
+   *
+   * 0.135 → ~4,5 s de frappe continue : dans la même famille que les autres,
+   * un peu plus long parce que la Surcharge touche jusqu'à 4 ennemis.
+   */
+  ultChargePerDamage: 0.135,
   // Voix : claquement d'éclair sec ; vrai coup de tonnerre pour la Surcharge.
   sound: { attack: "bolt_astrape", ult: "ult_thunder" },
   sprite: {

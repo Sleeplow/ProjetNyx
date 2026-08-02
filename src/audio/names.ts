@@ -16,6 +16,7 @@ export type SfxName =
   // Attaques SIGNATURE par Zarek
   | 'shoot_wave' // Zephyr — « Ondes sonores »
   | 'shoot_heavy' // Atlas — « Impact »
+  | 'rock_break' // Atlas — roche qui éclate au sol
   | 'potion_hecate' // Hécate — « Potion toxique »
   | 'bolt_astrape' // Astrapé — « Éclair »
   // Ultimes SIGNATURE par Zarek

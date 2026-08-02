@@ -19,6 +19,7 @@ import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { createPowerGemVisual } from '../core/PowerCube';
 import { PuddleVisual, PUDDLE_DEPTH } from '../render/puddle';
+import { DustVisual, rockPoints, rockShatter, ROCK_COLOR } from '../render/rocks';
 import { BushField } from '../render/bushes';
 import { LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider } from '../render/props';
 import { drawCartoonPitch } from '../render/pitchRender';
@@ -26,6 +27,7 @@ import { drawChainBolt } from '../render/fx';
 import type { MatchSnapshot, SnapPlayer, FxEvent } from '../shared/game/snapshot';
 
 const TAU = Math.PI * 2;
+
 
 interface Avatar {
   vis: AvatarVisual;
@@ -58,7 +60,13 @@ export class OnlineGameScene extends Phaser.Scene {
   private ballGfx!: Phaser.GameObjects.Container;
   private projGfx!: Phaser.GameObjects.Graphics;
   /** Flaques toxiques : clé = position (fixe tant que la zone vit), comme les cubes. */
-  private hazVisuals = new Map<string, PuddleVisual>();
+  private hazVisuals = new Map<string, PuddleVisual | DustVisual>();
+  /**
+   * Roches en vol. Le snapshot ne porte pas d'id de projectile : on APPARIE
+   * chaque roche à la plus proche de la frame précédente pour lui garder sa
+   * forme et sa rotation. Sans ça elle changerait de caillou à chaque image.
+   */
+  private rockTracks: { x: number; y: number; seed: number; angle: number; spin: number; seen: boolean }[] = [];
   /** (Portal) Buissons + leur transparence quand le poison les envahit. */
   private bushField?: BushField;
   private zoneGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) zone qui rétrécit
@@ -136,6 +144,7 @@ export class OnlineGameScene extends Phaser.Scene {
     this.prevCubes = 0;
     this.prevUltReady = false;
     this.shootCd = 0;
+    this.rockTracks = [];
     // La scène est réutilisée entre les parties : on repart sans buissons, le
     // dessin de l'arène recrée le champ si le tableau en comporte.
     this.bushField = undefined;
@@ -281,11 +290,7 @@ export class OnlineGameScene extends Phaser.Scene {
       this.ballGfx.x = Phaser.Math.Linear(this.ballGfx.x, snap.ball.x, 0.5);
       this.ballGfx.y = Phaser.Math.Linear(this.ballGfx.y, snap.ball.y, 0.5);
     }
-    this.projGfx.clear();
-    for (const p of snap.proj) {
-      this.projGfx.fillStyle(p.c, 1).fillCircle(p.x, p.y, p.r);
-      this.projGfx.lineStyle(2, 0xffffff, 0.7).strokeCircle(p.x, p.y, p.r);
-    }
+    this.renderProjectiles(snap, dtSec);
     this.renderHazards(snap, dtMs);
 
     // 4) Caméra : joueur local prédit, ou survivant observé (spectateur BR).
@@ -365,6 +370,65 @@ export class OnlineGameScene extends Phaser.Scene {
     return sfx.volumeAt(dist(x, y, this.camX, this.camY));
   }
 
+  /**
+   * Projectiles : billes rondes, SAUF ceux d'un Zarek qui tire des roches
+   * (identifié par la couleur portée par le snapshot — même astuce que pour les
+   * sons signature, donc aucun changement de protocole). Les roches gardent
+   * forme et rotation d'une frame à l'autre grâce à `rockTracks`.
+   */
+  private renderProjectiles(snap: MatchSnapshot, dtSec: number): void {
+    const g = this.projGfx;
+    g.clear();
+    for (const t of this.rockTracks) t.seen = false;
+
+    for (const p of snap.proj) {
+      const def = zarekByFxColor(p.c);
+      const isRock = (def?.attack.dustRadius ?? 0) > 0;
+      if (!isRock) {
+        g.fillStyle(p.c, 1).fillCircle(p.x, p.y, p.r);
+        g.lineStyle(2, 0xffffff, 0.7).strokeCircle(p.x, p.y, p.r);
+        continue;
+      }
+      const track = this.trackRock(p.x, p.y, dtSec);
+      g.save();
+      g.translateCanvas(p.x, p.y);
+      g.rotateCanvas(track.angle);
+      const pts = rockPoints(track.seed, p.r);
+      g.fillStyle(ROCK_COLOR, 1);
+      g.fillPoints(pts, true);
+      g.lineStyle(Math.max(1.5, p.r * 0.16), 0x3a2a16, 1);
+      g.strokePoints(pts, true, true);
+      g.restore();
+    }
+    this.rockTracks = this.rockTracks.filter((t) => t.seen);
+  }
+
+  /** Retrouve (ou crée) le suivi d'une roche à cette position. */
+  private trackRock(x: number, y: number, dtSec: number): { seed: number; angle: number } {
+    // Seuil large : à 480 px/s et 20 images/s, une roche avance ~24 px par frame.
+    const MATCH_DIST = 70;
+    let best: (typeof this.rockTracks)[number] | undefined;
+    let bestD = MATCH_DIST;
+    for (const t of this.rockTracks) {
+      if (t.seen) continue;
+      const d = Math.hypot(t.x - x, t.y - y);
+      if (d < bestD) {
+        bestD = d;
+        best = t;
+      }
+    }
+    if (!best) {
+      const seed = Math.floor(Math.random() * 97);
+      best = { x, y, seed, angle: seed, spin: (seed % 2 === 0 ? 1 : -1) * (2.2 + (seed % 5) * 0.6), seen: false };
+      this.rockTracks.push(best);
+    }
+    best.x = x;
+    best.y = y;
+    best.angle += best.spin * dtSec;
+    best.seen = true;
+    return best;
+  }
+
   private playFx(fx: FxEvent[]): void {
     for (const f of fx) {
       if (f.k === 'goal') {
@@ -392,6 +456,11 @@ export class OnlineGameScene extends Phaser.Scene {
         const ring = this.add.circle(f.x, f.y, f.r ?? 100, f.c ?? 0xffffff, 0.12).setStrokeStyle(8, f.c ?? 0xffffff, 0.9).setDepth(25).setScale(0.15);
         this.tweens.add({ targets: ring, scale: 1, duration: 320, ease: 'Cubic.out' });
         this.tweens.add({ targets: ring, alpha: 0, duration: 440, ease: 'Quad.in', onComplete: () => ring.destroy() });
+      } else if (f.k === 'hit' && f.c === COLORS.dust) {
+        // Signature « roche éclatée » : le serveur envoie un `hit` couleur
+        // poussière à l'endroit où la roche s'est brisée.
+        sfx.play('rock_break', { volume: this.sfxVol(f.x, f.y) });
+        rockShatter(this, f.x, f.y, 15);
       } else if (f.k === 'hit') {
         sfx.play('hit', { volume: this.sfxVol(f.x, f.y) });
         const color = f.c ?? 0xffffff;
@@ -862,7 +931,11 @@ export class OnlineGameScene extends Phaser.Scene {
       seen.add(key);
       let v = this.hazVisuals.get(key);
       if (!v) {
-        v = new PuddleVisual(this, h.x, h.y, { radius: h.r, color: h.c, depth: PUDDLE_DEPTH });
+        // La couleur fait foi : poussière d'Atlas → voile ; sinon flaque.
+        v =
+          h.c === COLORS.dust
+            ? new DustVisual(this, h.x, h.y, h.r, h.c, PUDDLE_DEPTH)
+            : new PuddleVisual(this, h.x, h.y, { radius: h.r, color: h.c, depth: PUDDLE_DEPTH });
         this.hazVisuals.set(key, v);
       }
       v.update(dtMs);

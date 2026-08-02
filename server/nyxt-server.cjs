@@ -24778,6 +24778,10 @@ var COLORS = {
   zoneDanger: 4857210,
   powerCube: 6742271,
   poison: 8839258,
+  /** Poussière de roche éclatée (Atlas) — sert AUSSI de signature du nuage dans
+   * le snapshot réseau : le client reconnaît la zone à sa couleur, sans avoir à
+   * étendre le protocole. */
+  dust: 11706507,
   playerAccent: 16769126,
   healthGood: 4641120,
   healthLow: 14698298,
@@ -24898,7 +24902,14 @@ var ATLAS = {
     damage: 260,
     range: 240,
     speed: 480,
-    projRadius: 15
+    projRadius: 15,
+    // Les roches éclatent au contact et laissent un voile de poussière : un
+    // ralentissement LÉGER et bref, juste de quoi coller un fuyard. Le vrai
+    // freinage reste l'ultime (0.4 pendant 3 s) — d'où l'écart volontaire.
+    dustRadius: 64,
+    dustMs: 1500,
+    dustSlowFactor: 0.82,
+    dustSlowMs: 420
   },
   ultimate: {
     kind: "shockwave",
@@ -25555,6 +25566,8 @@ var SimProjectile = class {
     this.color = color;
     this.alive = true;
     this.landsInto = null;
+    /** Roche (Atlas) : éclate à l'impact et laisse un nuage ralentissant. */
+    this.leavesDust = null;
     this.distanceLeft = range;
   }
   update(dtSec) {
@@ -26366,12 +26379,17 @@ var MatchSim = class {
       const spread = a.spreadDeg * Math.PI / 180;
       const dmg = a.damage * c.damageMult;
       const muzzle = c.def.radius + 6;
+      const isRock = (a.dustRadius ?? 0) > 0;
       for (let i = 0; i < a.count; i++) {
         const t = a.count === 1 ? 0 : i / (a.count - 1) - 0.5;
         const ang = c.aimAngle + t * spread;
         const dx = Math.cos(ang);
         const dy = Math.sin(ang);
-        this.projectiles.push(new SimProjectile(c.id, c.x + dx * muzzle, c.y + dy * muzzle, dx * a.speed, dy * a.speed, dmg, a.projRadius, a.range, c.def.color));
+        const p = new SimProjectile(c.id, c.x + dx * muzzle, c.y + dy * muzzle, dx * a.speed, dy * a.speed, dmg, a.projRadius, a.range, c.def.color);
+        if (isRock) {
+          p.leavesDust = { radius: a.dustRadius, durationMs: a.dustMs ?? 1500, slowFactor: a.dustSlowFactor ?? 0.85, slowMs: a.dustSlowMs ?? 400 };
+        }
+        this.projectiles.push(p);
       }
     }
     c.reloadTimer = a.reloadMs;
@@ -26480,7 +26498,19 @@ var MatchSim = class {
         }
       }
     }
+    for (const p of this.projectiles) if (!p.alive && p.leavesDust) this.spawnDust(p);
     this.projectiles = this.projectiles.filter((p) => p.alive);
+  }
+  /** Nuage de poussière d'une roche éclatée : ralentit légèrement, aucun dégât.
+   * Sa COULEUR (`COLORS.dust`) sert de signature au client pour le dessiner en
+   * voile plutôt qu'en flaque — pas besoin d'étendre le format du snapshot. */
+  spawnDust(p) {
+    const d = p.leavesDust;
+    const h = new SimHazard(p.x, p.y, d.radius, p.ownerId, d.durationMs, 0, COLORS.dust);
+    h.slowFactor = d.slowFactor;
+    h.slowMs = d.slowMs;
+    this.hazards.push(h);
+    this.fx.push({ k: "hit", x: p.x, y: p.y, c: COLORS.dust });
   }
   spawnPuddle(p) {
     const info = p.landsInto;

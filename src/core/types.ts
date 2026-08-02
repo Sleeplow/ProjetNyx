@@ -63,6 +63,19 @@ export interface AttackDef {
   aoeDurationMs?: number;
   /** (kind 'potion') Dégâts par seconde infligés dans la flaque. */
   aoeDps?: number;
+  /**
+   * (kind 'projectile') Le projectile est une ROCHE : elle éclate à l'impact et
+   * laisse un nuage de poussière qui ralentit LÉGÈREMENT. Volontairement discret
+   * — c'est l'ultime qui ralentit pour de bon.
+   */
+  /** Rayon du nuage de poussière laissé à l'impact (px). 0/absent = pas de nuage. */
+  dustRadius?: number;
+  /** Durée de vie du nuage avant dissipation (ms). */
+  dustMs?: number;
+  /** Facteur de vitesse dans le nuage (0.82 = −18 %). */
+  dustSlowFactor?: number;
+  /** Durée du ralentissement, rafraîchie tant qu'on reste dans le nuage (ms). */
+  dustSlowMs?: number;
   /** (kind 'chain') Portée de rebond vers la cible suivante (px). */
   chainJumpRange?: number;
   /** (kind 'chain') Nombre de REBONDS après la première cible (2 → 3 cibles). */

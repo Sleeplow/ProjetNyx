@@ -34,6 +34,7 @@ const THROTTLE_MS: Partial<Record<SfxName, number>> = {
   shoot: 70,
   shoot_wave: 70,
   shoot_heavy: 70,
+  rock_break: 60,
   hit: 60,
   bolt: 90,
   bolt_astrape: 90,
@@ -296,6 +297,13 @@ class SfxEngine {
     shoot_heavy: (t, v) => {
       this.tone(t, { type: 'square', from: 220, to: 60, dur: 0.19, vol: 0.26 * v });
       this.noise(t, { dur: 0.14, vol: 0.16 * v, from: 700, to: 130 });
+    },
+    /** Atlas — roche qui ÉCLATE : craquement sec + gravats qui retombent. */
+    rock_break: (t, v) => {
+      this.noise(t, { dur: 0.09, vol: 0.2 * v, filter: 'bandpass', from: 1700, to: 700 });
+      this.tone(t, { type: 'square', from: 180, to: 70, dur: 0.1, vol: 0.16 * v });
+      // Petite traîne granuleuse : les débris qui roulent après le choc.
+      this.noise(t, { dur: 0.26, vol: 0.09 * v, from: 900, to: 260, delay: 0.06 });
     },
     /** Hécate — « Potion toxique » : glouglou de fiole qui monte (liquide). */
     potion_hecate: (t, v) => {

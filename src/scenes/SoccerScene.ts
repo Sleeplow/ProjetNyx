@@ -15,6 +15,7 @@ import { sfx } from '../audio/sfx';
 import { music } from '../audio/music';
 import { attackSfx, ultSfx } from '../audio/zarekSfx';
 import { ZAREKS, getZarek } from '../zareks/registry';
+import { rockShatter } from '../render/rocks';
 import { COLORS } from '../config/constants';
 import { TEAM, BALL, SOCCER } from '../config/soccer';
 import { clamp, dist, normalize, resolveCircleRect, pointInRect, circleHitsRect } from '../core/geometry';
@@ -444,15 +445,19 @@ export class SoccerScene extends Phaser.Scene {
       const spread = Phaser.Math.DegToRad(a.spreadDeg);
       const dmg = a.damage * c.damageMult;
       const muzzle = c.def.radius + 6;
+      // Une attaque qui déclare un nuage de poussière tire des ROCHES.
+      const isRock = (a.dustRadius ?? 0) > 0;
       this.muzzleFlash(c.x + Math.cos(c.aimAngle) * muzzle, c.y + Math.sin(c.aimAngle) * muzzle, c.def.color);
       for (let i = 0; i < a.count; i++) {
         const t = a.count === 1 ? 0 : i / (a.count - 1) - 0.5;
         const ang = c.aimAngle + t * spread;
         const dx = Math.cos(ang);
         const dy = Math.sin(ang);
-        this.projectiles.push(
-          new Projectile(this, c.id, c.x + dx * muzzle, c.y + dy * muzzle, dx * a.speed, dy * a.speed, dmg, a.projRadius, a.range, c.def.color),
-        );
+        const proj = new Projectile(this, c.id, c.x + dx * muzzle, c.y + dy * muzzle, dx * a.speed, dy * a.speed, dmg, a.projRadius, a.range, c.def.color, isRock);
+        if (isRock) {
+          proj.leavesDust = { radius: a.dustRadius!, durationMs: a.dustMs ?? 1500, slowFactor: a.dustSlowFactor ?? 0.85, slowMs: a.dustSlowMs ?? 400 };
+        }
+        this.projectiles.push(proj);
       }
     }
     c.reloadTimer = a.reloadMs;
@@ -595,11 +600,36 @@ export class SoccerScene extends Phaser.Scene {
     }
     this.projectiles = this.projectiles.filter((p) => {
       if (!p.alive) {
+        // Une roche qui meurt éclate — quelle qu'en soit la cause (ennemi
+        // touché, obstacle, portée épuisée). Un seul point de passage plutôt
+        // qu'un appel dupliqué à chaque site d'impact.
+        if (p.leavesDust) this.shatterIntoDust(p);
         p.destroy();
         return false;
       }
       return true;
     });
+  }
+
+  /** Une roche d'Atlas éclate : éclats projetés + nuage de poussière au sol qui
+   * ralentit légèrement (le vrai freinage reste l'ultime). */
+  private shatterIntoDust(p: Projectile): void {
+    const d = p.leavesDust!;
+    sfx.play('rock_break', { volume: this.sfxVol(p.x, p.y) });
+    rockShatter(this, p.x, p.y, p.radius);
+    this.hazards.push(
+      new HazardZone(this, p.x, p.y, {
+        radius: d.radius,
+        ownerId: p.ownerId,
+        durationMs: d.durationMs,
+        color: COLORS.dust,
+        dps: 0,
+        slowFactor: d.slowFactor,
+        slowMs: d.slowMs,
+        chargesUlt: false,
+        look: 'dust',
+      }),
+    );
   }
 
   private spawnPotionPuddle(p: Projectile): void {

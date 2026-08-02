@@ -20,7 +20,8 @@ import { sfx } from '../audio/sfx';
 import { music } from '../audio/music';
 import { attackSfx, ultSfx } from '../audio/zarekSfx';
 import { ZAREKS, getZarek } from '../zareks/registry';
-import { ROCK_KEYS, BUSH_KEYS, LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider, isInBush } from '../render/props';
+import { ROCK_KEYS, LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider, isInBush } from '../render/props';
+import { BushField } from '../render/bushes';
 import { COLORS, POWER_CUBE, PLAYERS_PER_MATCH, BUSH } from '../config/constants';
 import { clamp, dist, normalize, resolveCircleRect, circleHitsRect } from '../core/geometry';
 
@@ -51,6 +52,8 @@ export class GameScene extends Phaser.Scene {
   private projectiles: Projectile[] = [];
   private cubes: PowerCube[] = [];
   private hazards: HazardZone[] = [];
+  /** Buissons + leur état « enfumé » par le poison (créé au dessin de l'arène). */
+  private bushField!: BushField;
   private aimReticle!: Phaser.GameObjects.Arc;
   private playerController!: PlayerController;
   private hud!: Hud;
@@ -270,11 +273,9 @@ export class GameScene extends Phaser.Scene {
     this.add.rectangle(width / 2, height / 2, width, height).setStrokeStyle(10, 0x7a5cff, 1).setDepth(7);
 
     // Buissons : décor baké (KayKit Forest) — variante stable par position.
-    for (const b of this.map.bushes) {
-      const cx = b.x + b.w / 2;
-      const cy = b.y + b.h / 2;
-      drawPropAt(this, cx, cy, pickPropKey(BUSH_KEYS, cx, cy), 8);
-    }
+    // Confiés au `BushField` : il les dessine ET gère leur transparence quand
+    // le poison les envahit.
+    this.bushField = new BushField(this, this.map.bushes, 8);
     // Obstacles : rochers bakés (KayKit Forest) — variante stable par position.
     for (const o of this.map.obstacles) {
       const cx = o.x + o.w / 2;
@@ -313,11 +314,7 @@ export class GameScene extends Phaser.Scene {
     this.add.rectangle(width / 2, height / 2, width, height).setStrokeStyle(10, 0x5a6cff, 1).setDepth(7);
 
     // Buissons (cachette) — décor baké KayKit Forest, comme l'arène BR classique.
-    for (const b of this.map.bushes) {
-      const cx = b.x + b.w / 2;
-      const cy = b.y + b.h / 2;
-      drawPropAt(this, cx, cy, pickPropKey(BUSH_KEYS, cx, cy), 8);
-    }
+    this.bushField = new BushField(this, this.map.bushes, 8);
 
     // Obstacles : la cloison pleine (pleine hauteur) devient un mur en modules
     // bakés (KayKit Dungeon) empilés + liseré de danger ; les autres sont des
@@ -525,6 +522,12 @@ export class GameScene extends Phaser.Scene {
     this.updateHazards(dtSec, dtMs);
     for (const c of this.combatants) if (c.alive) c.tickPoison(dtMs);
 
+    // 6ter) Buissons enfumés : une flaque qui atteint une cachette la rend
+    //       translucide et cesse de camoufler ceux qui s'y trouvent — on les
+    //       aperçoit en transparence, et l'IA les repère aussi.
+    this.bushField.update(this.hazards, dtMs);
+    for (const c of this.combatants) c.concealed = c.inBush && !this.bushField.isGassed(c.x, c.y);
+
     // 7) Ramassage de cubes.
     for (const c of this.combatants) {
       if (!c.alive) continue;
@@ -569,7 +572,7 @@ export class GameScene extends Phaser.Scene {
     //    révèle tout le monde (le spectateur voit tout).
     for (const c of this.combatants) {
       if (!c.alive && !(c.isPlayer && !this.spectating)) continue;
-      const revealed = this.spectating || c.isPlayer || !c.inBush || dist(c.x, c.y, this.player.x, this.player.y) <= BUSH.revealRange;
+      const revealed = this.spectating || c.isPlayer || !c.concealed || dist(c.x, c.y, this.player.x, this.player.y) <= BUSH.revealRange;
       c.syncDisplay(revealed);
     }
     if (this.spectating) this.player.hide();

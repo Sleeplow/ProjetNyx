@@ -198,8 +198,10 @@ export class BotController {
       if (c === self || !c.alive) continue;
       const d = dist(self.x, self.y, c.x, c.y);
       if (d > AI.visionRange) continue;
-      // Un ennemi caché dans un buisson n'est repéré que de près.
-      if (c.inBush && d > BUSH.revealRange) continue;
+      // Un ennemi caché dans un buisson n'est repéré que de près. Un buisson
+      // noyé de poison ne camoufle plus (`concealed`) : la cible redevient
+      // visible de loin, comme pour le joueur.
+      if (c.concealed && d > BUSH.revealRange) continue;
       if (d < bestD) {
         bestD = d;
         best = c;

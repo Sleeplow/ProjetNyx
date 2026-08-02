@@ -72,12 +72,20 @@ export function isInBush(x: number, y: number, b: Rect): boolean {
   return (x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r;
 }
 
+/** Décor posé : l'image + son ombre, renvoyés pour que l'appelant puisse encore
+ * agir dessus (ex. rendre un buisson translucide quand le poison l'atteint). */
+export interface PlacedProp {
+  img: Phaser.GameObjects.Image;
+  shadow: Phaser.GameObjects.Ellipse;
+}
+
 /** Pose un décor baké au sol avec une ombre douce (pour ne pas « flotter »).
  * Partagé entre le solo (`GameScene`) et l'en ligne (`OnlineGameScene`). */
-export function drawPropAt(scene: Phaser.Scene, cx: number, cy: number, key: string, depth: number): void {
+export function drawPropAt(scene: Phaser.Scene, cx: number, cy: number, key: string, depth: number): PlacedProp {
   const s = propScale(key);
-  scene.add.ellipse(cx, cy + 46 * s, 150 * s, 56 * s, 0x000000, 0.22).setDepth(depth - 1);
-  scene.add.image(cx, cy, key).setScale(s).setDepth(depth);
+  const shadow = scene.add.ellipse(cx, cy + 46 * s, 150 * s, 56 * s, 0x000000, 0.22).setDepth(depth - 1);
+  const img = scene.add.image(cx, cy, key).setScale(s).setDepth(depth);
+  return { img, shadow };
 }
 
 /** Cloison pleine hauteur : modules de mur bakés (KayKit Dungeon) empilés,

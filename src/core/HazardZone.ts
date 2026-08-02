@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { PuddleVisual } from '../render/puddle';
+import { PuddleVisual, PUDDLE_DEPTH } from '../render/puddle';
 
 export interface HazardOptions {
   radius: number;
@@ -53,7 +53,9 @@ export class HazardZone {
     this.remainingMs = opts.durationMs;
 
     // Flaque organique (contour irrégulier + bulles visqueuses), pas un rond.
-    this.vis = new PuddleVisual(scene, x, y, { radius: opts.radius, color: opts.color, depth: 11 });
+    // Profondeur SOUS le décor (buissons 8, rochers/caisses 9) : le poison est
+    // au SOL, une roche plantée dedans doit le masquer là où elle est posée.
+    this.vis = new PuddleVisual(scene, x, y, { radius: opts.radius, color: opts.color, depth: PUDDLE_DEPTH });
   }
 
   update(dtMs: number): void {

@@ -17,6 +17,14 @@ import Phaser from 'phaser';
  */
 
 const TAU = Math.PI * 2;
+
+/**
+ * Profondeur d'affichage d'une flaque. Volontairement SOUS le décor posé au sol
+ * (ombres de décor 7, buissons 8, rochers/caisses 9) : le poison s'étale par
+ * terre, donc une roche plantée dedans le masque là où elle repose — au lieu de
+ * la nappe qui recouvrait tout, y compris les obstacles.
+ */
+export const PUDDLE_DEPTH = 6;
 /** Points du contour : assez pour que les lobes soient lisses, pas trop pour le coût. */
 const OUTLINE_STEPS = 52;
 /**

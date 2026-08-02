@@ -18,8 +18,9 @@ import { safeInsets } from '../ui/layout';
 import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { createPowerGemVisual } from '../core/PowerCube';
-import { PuddleVisual } from '../render/puddle';
-import { BUSH_KEYS, LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider } from '../render/props';
+import { PuddleVisual, PUDDLE_DEPTH } from '../render/puddle';
+import { BushField } from '../render/bushes';
+import { LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider } from '../render/props';
 import { drawCartoonPitch } from '../render/pitchRender';
 import { drawChainBolt } from '../render/fx';
 import type { MatchSnapshot, SnapPlayer, FxEvent } from '../shared/game/snapshot';
@@ -58,6 +59,8 @@ export class OnlineGameScene extends Phaser.Scene {
   private projGfx!: Phaser.GameObjects.Graphics;
   /** Flaques toxiques : clé = position (fixe tant que la zone vit), comme les cubes. */
   private hazVisuals = new Map<string, PuddleVisual>();
+  /** (Portal) Buissons + leur transparence quand le poison les envahit. */
+  private bushField?: BushField;
   private zoneGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) zone qui rétrécit
   private cubeSprites = new Map<string, Phaser.GameObjects.Container>(); // (Battle Royale) cubes de power-up, clé = position (fixe)
   private gasGfx!: Phaser.GameObjects.Graphics; // (Portal) voiles de neurotoxine
@@ -133,6 +136,9 @@ export class OnlineGameScene extends Phaser.Scene {
     this.prevCubes = 0;
     this.prevUltReady = false;
     this.shootCd = 0;
+    // La scène est réutilisée entre les parties : on repart sans buissons, le
+    // dessin de l'arène recrée le champ si le tableau en comporte.
+    this.bushField = undefined;
 
     const { width, height } = this.arena;
     this.cameras.main.setBounds(0, 0, width, height);
@@ -768,11 +774,7 @@ export class OnlineGameScene extends Phaser.Scene {
 
     this.add.rectangle(width / 2, height / 2, width, height).setStrokeStyle(10, 0x5a6cff, 1).setDepth(7);
 
-    for (const b of PORTAL_ARENA.bushes) {
-      const cx = b.x + b.w / 2;
-      const cy = b.y + b.h / 2;
-      drawPropAt(this, cx, cy, pickPropKey(BUSH_KEYS, cx, cy), 8);
-    }
+    this.bushField = new BushField(this, PORTAL_ARENA.bushes, 8);
     for (const o of PORTAL_ARENA.obstacles) {
       if (o.h >= height - 1) drawWallDivider(this, o, 9);
       else {
@@ -860,7 +862,7 @@ export class OnlineGameScene extends Phaser.Scene {
       seen.add(key);
       let v = this.hazVisuals.get(key);
       if (!v) {
-        v = new PuddleVisual(this, h.x, h.y, { radius: h.r, color: h.c, depth: 11 });
+        v = new PuddleVisual(this, h.x, h.y, { radius: h.r, color: h.c, depth: PUDDLE_DEPTH });
         this.hazVisuals.set(key, v);
       }
       v.update(dtMs);
@@ -871,6 +873,12 @@ export class OnlineGameScene extends Phaser.Scene {
         this.hazVisuals.delete(key);
       }
     }
+    // Buissons noyés de poison : feuillage translucide. Purement visuel ici —
+    // le serveur n'a pas de notion de camouflage (voir MatchSim).
+    this.bushField?.update(
+      snap.haz.map((h) => ({ x: h.x, y: h.y, radius: h.r })),
+      dtMs,
+    );
   }
 
   /** (Battle Royale) Voile rouge quand le joueur local est hors de la zone. */

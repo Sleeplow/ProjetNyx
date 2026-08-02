@@ -18,7 +18,9 @@ import { safeInsets } from '../ui/layout';
 import { LeaderboardTable, type BoardRow } from '../ui/LeaderboardTable';
 import { createAvatarVisual, type AvatarVisual } from '../render/avatarVisual';
 import { createPowerGemVisual } from '../core/PowerCube';
-import { BUSH_KEYS, LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider } from '../render/props';
+import { PuddleVisual, PUDDLE_DEPTH } from '../render/puddle';
+import { BushField } from '../render/bushes';
+import { LAB_CRATE_KEYS, pickPropKey, drawPropAt, drawWallDivider } from '../render/props';
 import { drawCartoonPitch } from '../render/pitchRender';
 import { drawChainBolt } from '../render/fx';
 import type { MatchSnapshot, SnapPlayer, FxEvent } from '../shared/game/snapshot';
@@ -55,7 +57,10 @@ export class OnlineGameScene extends Phaser.Scene {
   private avatars = new Map<string, Avatar>();
   private ballGfx!: Phaser.GameObjects.Container;
   private projGfx!: Phaser.GameObjects.Graphics;
-  private hazGfx!: Phaser.GameObjects.Graphics;
+  /** Flaques toxiques : clé = position (fixe tant que la zone vit), comme les cubes. */
+  private hazVisuals = new Map<string, PuddleVisual>();
+  /** (Portal) Buissons + leur transparence quand le poison les envahit. */
+  private bushField?: BushField;
   private zoneGfx!: Phaser.GameObjects.Graphics; // (Battle Royale) zone qui rétrécit
   private cubeSprites = new Map<string, Phaser.GameObjects.Container>(); // (Battle Royale) cubes de power-up, clé = position (fixe)
   private gasGfx!: Phaser.GameObjects.Graphics; // (Portal) voiles de neurotoxine
@@ -131,6 +136,9 @@ export class OnlineGameScene extends Phaser.Scene {
     this.prevCubes = 0;
     this.prevUltReady = false;
     this.shootCd = 0;
+    // La scène est réutilisée entre les parties : on repart sans buissons, le
+    // dessin de l'arène recrée le champ si le tableau en comporte.
+    this.bushField = undefined;
 
     const { width, height } = this.arena;
     this.cameras.main.setBounds(0, 0, width, height);
@@ -142,7 +150,8 @@ export class OnlineGameScene extends Phaser.Scene {
     this.cubeSprites = new Map();
     this.gasGfx = this.add.graphics().setDepth(12);
     this.portalGfx = this.add.graphics().setDepth(13);
-    this.hazGfx = this.add.graphics().setDepth(11);
+    for (const v of this.hazVisuals.values()) v.destroy();
+    this.hazVisuals = new Map();
     this.ballGfx = this.makeBall();
     if (this.isBR()) this.ballGfx.setVisible(false);
     this.projGfx = this.add.graphics().setDepth(18);
@@ -168,6 +177,8 @@ export class OnlineGameScene extends Phaser.Scene {
       this.controller.destroy();
       this.destroyOverlay();
       this.teardownSpectate();
+      for (const v of this.hazVisuals.values()) v.destroy();
+      this.hazVisuals.clear();
       this.reconnectText?.destroy();
       this.reconnectText = undefined;
     });
@@ -275,11 +286,7 @@ export class OnlineGameScene extends Phaser.Scene {
       this.projGfx.fillStyle(p.c, 1).fillCircle(p.x, p.y, p.r);
       this.projGfx.lineStyle(2, 0xffffff, 0.7).strokeCircle(p.x, p.y, p.r);
     }
-    this.hazGfx.clear();
-    for (const h of snap.haz) {
-      this.hazGfx.fillStyle(h.c, 0.18).fillCircle(h.x, h.y, h.r);
-      this.hazGfx.lineStyle(3, h.c, 0.7).strokeCircle(h.x, h.y, h.r);
-    }
+    this.renderHazards(snap, dtMs);
 
     // 4) Caméra : joueur local prédit, ou survivant observé (spectateur BR).
     const spec = this.updateSpectator(snap, me);
@@ -767,11 +774,7 @@ export class OnlineGameScene extends Phaser.Scene {
 
     this.add.rectangle(width / 2, height / 2, width, height).setStrokeStyle(10, 0x5a6cff, 1).setDepth(7);
 
-    for (const b of PORTAL_ARENA.bushes) {
-      const cx = b.x + b.w / 2;
-      const cy = b.y + b.h / 2;
-      drawPropAt(this, cx, cy, pickPropKey(BUSH_KEYS, cx, cy), 8);
-    }
+    this.bushField = new BushField(this, PORTAL_ARENA.bushes, 8);
     for (const o of PORTAL_ARENA.obstacles) {
       if (o.h >= height - 1) drawWallDivider(this, o, 9);
       else {
@@ -843,6 +846,39 @@ export class OnlineGameScene extends Phaser.Scene {
         this.cubeSprites.delete(key);
       }
     }
+  }
+
+  /**
+   * Flaques toxiques (potion / aura) : mêmes visuels organiques qu'en solo.
+   * Comme les cubes, le snapshot n'a pas d'id stable → la position sert de clé,
+   * ce qui garde la MÊME instance d'une frame à l'autre : indispensable ici,
+   * puisque la forme et les bulles sont animées dans la durée (recréer l'objet
+   * à chaque frame ferait grouiller la flaque).
+   */
+  private renderHazards(snap: MatchSnapshot, dtMs: number): void {
+    const seen = new Set<string>();
+    for (const h of snap.haz) {
+      const key = `${Math.round(h.x)},${Math.round(h.y)}`;
+      seen.add(key);
+      let v = this.hazVisuals.get(key);
+      if (!v) {
+        v = new PuddleVisual(this, h.x, h.y, { radius: h.r, color: h.c, depth: PUDDLE_DEPTH });
+        this.hazVisuals.set(key, v);
+      }
+      v.update(dtMs);
+    }
+    for (const [key, v] of this.hazVisuals) {
+      if (!seen.has(key)) {
+        v.destroy();
+        this.hazVisuals.delete(key);
+      }
+    }
+    // Buissons noyés de poison : feuillage translucide. Purement visuel ici —
+    // le serveur n'a pas de notion de camouflage (voir MatchSim).
+    this.bushField?.update(
+      snap.haz.map((h) => ({ x: h.x, y: h.y, radius: h.r })),
+      dtMs,
+    );
   }
 
   /** (Battle Royale) Voile rouge quand le joueur local est hors de la zone. */

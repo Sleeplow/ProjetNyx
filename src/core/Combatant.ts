@@ -42,8 +42,14 @@ export class Combatant {
   /** Vitesse de recul (knockback) en cours, décroît avec le temps. */
   kbX = 0;
   kbY = 0;
-  /** Vrai si le centre du combattant est dans un buisson (caché). */
+  /** Vrai si le centre du combattant est dans un buisson (aspect estompé). */
   inBush = false;
+  /**
+   * Vrai s'il y est réellement CACHÉ — c.-à-d. dans un buisson qui camoufle
+   * encore. Un buisson noyé de poison ne cache plus : on est toujours « dans le
+   * buisson » (donc estompé) mais plus invisible, et l'IA vous voit.
+   */
+  concealed = false;
   /** Temps écoulé depuis le dernier tir OU dégât subi (ms) — pilote la régén. */
   sinceCombatMs = 0;
   /** Poison actif : durée restante (ms) et dégâts/seconde. Persiste hors de l'aura. */
@@ -204,7 +210,7 @@ export class Combatant {
     // les bots. Le joueur se voit toujours, juste estompé quand il est caché.
     if (this.isPlayer) {
       this.vis.container.setVisible(true).setAlpha(this.inBush ? 0.55 : 1);
-    } else if (this.inBush && !revealedToPlayer) {
+    } else if (this.concealed && !revealedToPlayer) {
       this.vis.container.setVisible(false);
     } else {
       this.vis.container.setVisible(true).setAlpha(this.inBush ? 0.5 : 1);

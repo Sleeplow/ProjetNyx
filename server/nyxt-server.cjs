@@ -8327,6 +8327,7 @@ var require_core = __commonJS({
       "node:domain": [">= 14.18 && < 15", ">= 16"],
       events: true,
       "node:events": [">= 14.18 && < 15", ">= 16"],
+      "node:ffi": ">= 26.9",
       freelist: "< 6",
       fs: true,
       "node:fs": [">= 14.18 && < 15", ">= 16"],
@@ -8469,8 +8470,8 @@ var require_is_core_module = __commonJS({
       var op = parts.length > 1 ? parts[0] : "=";
       var versionParts = (parts.length > 1 ? parts[1] : parts[0]).split(".");
       for (var i = 0; i < 3; ++i) {
-        var cur = parseInt(nodeParts[i] || 0, 10);
-        var ver = parseInt(versionParts[i] || 0, 10);
+        var cur = parseInt(nodeParts[i] || "0", 10);
+        var ver = parseInt(versionParts[i] || "0", 10);
         if (cur === ver) {
           continue;
         }
@@ -8516,7 +8517,10 @@ var require_is_core_module = __commonJS({
     }
     var data = require_core();
     module2.exports = function isCore(x, nodeVersion) {
-      return hasOwn(data, x) && versionIncluded(nodeVersion, data[x]);
+      return hasOwn(data, x) && versionIncluded(nodeVersion, data[
+        /** @type {Module} */
+        x
+      ]);
     };
   }
 });

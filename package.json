@@ -27,7 +27,7 @@
     "@colyseus/core": "^0.16.24",
     "@colyseus/ws-transport": "^0.16.5",
     "colyseus.js": "^0.16.22",
-    "phaser": "^3.87.0"
+    "phaser": "^4.2.1"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

@@ -22159,7 +22159,7 @@ var Room = class _Room {
     this.reservedSeatTimeouts = {};
     this._reconnections = {};
     this._reconnectingSessionId = /* @__PURE__ */ new Map();
-    this.onMessageHandlers = {
+    this.onMessageHandlers = Object.assign(/* @__PURE__ */ Object.create(null), {
       "__no_message_handler": {
         callback: (client, messageType, _) => {
           const errorMessage = `room onMessage for "${messageType}" not registered.`;
@@ -22171,7 +22171,7 @@ var Room = class _Room {
           }
         }
       }
-    };
+    });
     this._serializer = noneSerializer;
     this._afterNextPatchQueue = [];
     this._internalState = 0;
@@ -23493,7 +23493,7 @@ function getLockId(filterOptions) {
 }
 
 // node_modules/@colyseus/core/build/MatchMaker.mjs
-var handlers = {};
+var handlers = /* @__PURE__ */ Object.create(null);
 var rooms = {};
 var events = new import_events4.EventEmitter();
 var publicAddress;

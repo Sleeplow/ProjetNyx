@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { Client, type Room } from 'colyseus.js';
+import { Client, type Room } from '@colyseus/sdk';
 import { serverUrl } from '../net/config';
 import { PlayerController } from '../input/PlayerController';
 import { PITCH_NYXT } from '../maps/pitchNyxt';

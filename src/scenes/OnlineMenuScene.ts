@@ -5,7 +5,7 @@ import { NetClient, type JoinOptions } from '../net/NetClient';
 import { currentServer, selectServer, resetServer } from '../net/config';
 import { allServers, addCustomServer, removeCustomServer, isCustom } from '../net/servers';
 import { ZAREKS } from '../zareks/registry';
-import type { Room } from 'colyseus.js';
+import type { Room } from '@colyseus/sdk';
 
 /**
  * Lobby en ligne : on entre un pseudo, puis on lance un match rapide, on crée un

@@ -1,5 +1,5 @@
 /**
- * Smoke test du serveur : démarre le bundle, connecte un client (colyseus.js) et
+ * Smoke test du serveur : démarre le bundle, connecte un client (@colyseus/sdk) et
  * vérifie le bout-en-bout — join, réception d'un snapshot, rejet d'une mauvaise
  * version (handshake), et sonde /health. Sort 0 si tout est bon.
  *
@@ -8,7 +8,7 @@
  */
 import { spawn } from 'child_process';
 import http from 'http';
-import { Client } from 'colyseus.js';
+import { Client } from '@colyseus/sdk';
 
 const PORT = 2599;
 const HEALTH = 2568;

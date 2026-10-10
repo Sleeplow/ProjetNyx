@@ -1,4 +1,4 @@
-import { Room, type Client, ServerError } from '@colyseus/core';
+import { Room, type Client, ServerError, CloseCode } from '@colyseus/core';
 import { Schema, defineTypes } from '@colyseus/schema';
 import { MatchSim, type OnlineMode } from '../src/shared/game/MatchSim';
 import { emptyInput, type InputState } from '../src/core/types';
@@ -47,7 +47,7 @@ interface JoinOptions {
  * match (Brawl Ball 3v3) à partir des `InputState` reçus et diffuse un snapshot
  * complet à chaque tick. L'id du salon sert de « code » à partager.
  */
-export class GameRoom extends Room<RoomInfo> {
+export class GameRoom extends Room<{ state: RoomInfo }> {
   maxClients = 6; // 6 humains max ; les places vides sont des bots (3v3 ou BR à 6)
   private sim!: MatchSim;
   /** Fenêtre glissante (1 s) du nombre de messages reçus par client. */
@@ -135,9 +135,9 @@ export class GameRoom extends Room<RoomInfo> {
    *  - déconnexion SUBIE (réseau mobile qui décroche) → on garde la place ~20 s,
    *    jouée par un bot, le temps que le joueur revienne (`allowReconnection`).
    */
-  async onLeave(client: Client, consented?: boolean): Promise<void> {
+  async onLeave(client: Client, code?: number): Promise<void> {
     this.msgWindow.delete(client.sessionId);
-    if (consented) {
+    if (code === CloseCode.CONSENTED) {
       this.finalizeLeave(client.sessionId);
       return;
     }
